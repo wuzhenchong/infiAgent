@@ -2,6 +2,7 @@ temperature: 0
 max_tokens: 0
 max_context_window: 200000
 base_url: https://openrouter.ai/api/v1
-api_key:
+# api_key: your-api-key-here
+api_key: sk-or-v1-REDACTED
 models:
-  - openai/anthropic/claude-haiku-4.5
+  - openai/openai/gpt-5
