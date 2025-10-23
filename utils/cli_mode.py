@@ -209,39 +209,29 @@ class InteractiveCLI:
                         # 解析 JSONL 事件
                         event = json.loads(line)
                         
-                        # 只显示关键事件
+                        # 显示所有事件（不截断）
                         if event['type'] == 'token':
                             text = event['text']
-                            # 简化显示
-                            if text.startswith('['):
-                                display_line = f"  💭 {text[:80]}..."
-                            elif '调用工具:' in text:
-                                display_line = f"  🔧 {text.split(chr(10))[0]}"
-                            elif '完成:' in text:
-                                parts = text.split(' - ', 1)
-                                if len(parts) == 2:
-                                    display_line = f"  ✅ {parts[0]}"
-                                else:
-                                    display_line = None
-                            else:
-                                display_line = None
+                            # 完整显示所有文本
+                            display_line = f"  {text}"
                             
-                            if display_line:
-                                self.output_lines.append(display_line)
-                                if len(self.output_lines) > self.max_output_lines:
-                                    self.output_lines.pop(0)
-                                print(display_line)
+                            self.output_lines.append(display_line)
+                            if len(self.output_lines) > self.max_output_lines:
+                                self.output_lines.pop(0)
+                            print(display_line)
                         
                         elif event['type'] == 'result':
                             # 显示完整结果
                             summary = event.get('summary', '')
-                            self.output_lines.append(f"📊 结果: {summary[:100]}...")
                             
                             print(f"\n{'='*80}")
                             print("📊 执行结果:")
                             print(f"{'='*80}")
-                            print(summary)
+                            print(summary)  # 完整显示
                             print(f"{'='*80}\n")
+                            
+                            # 简短摘要到输出历史
+                            self.output_lines.append(f"📊 结果: {summary[:100]}...")
                         
                         elif event['type'] == 'end':
                             status_icon = "✅" if event.get('status') == 'ok' else "❌"

@@ -14,6 +14,71 @@ from .file_tools import BaseTool, get_abs_path
 class ExecuteCodeTool(BaseTool):
     """代码执行工具（支持虚拟环境）"""
     
+    def _create_venv(self, venv_path: Path) -> bool:
+        """
+        创建虚拟环境（兼容 Anaconda 和标准 Python）
+        
+        策略：
+        1. 优先尝试标准 venv（CPython）
+        2. 失败时尝试 virtualenv（兼容 Anaconda）
+        3. 都失败返回 False
+        
+        Returns:
+            是否成功创建
+        """
+        # 创建父目录
+        venv_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 策略 1: 标准 venv
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "venv", str(venv_path)],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode == 0:
+                return True
+        except Exception:
+            pass
+        
+        # 策略 2: virtualenv（兼容 Anaconda）
+        try:
+            # 先尝试导入 virtualenv
+            import virtualenv
+            result = subprocess.run(
+                [sys.executable, "-m", "virtualenv", str(venv_path)],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode == 0:
+                return True
+        except ImportError:
+            # virtualenv 未安装，尝试安装
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "virtualenv"],
+                    capture_output=True,
+                    timeout=120
+                )
+                # 重试创建
+                result = subprocess.run(
+                    [sys.executable, "-m", "virtualenv", str(venv_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                if result.returncode == 0:
+                    return True
+            except Exception:
+                pass
+        except Exception:
+            pass
+        
+        # 都失败了
+        return False
+    
     def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行代码
@@ -106,14 +171,23 @@ class ExecuteCodeTool(BaseTool):
             # 检查虚拟环境
             venv_path = env_dir / "venv"
             if not venv_path.exists():
-                # 创建虚拟环境
-                subprocess.run([sys.executable, "-m", "venv", str(venv_path)], check=True)
-            
-            # 使用虚拟环境的Python
-            if sys.platform == "win32":
-                python_exec = venv_path / "Scripts" / "python.exe"
+                # 创建虚拟环境（兼容 Anaconda 和标准 Python）
+                venv_created = self._create_venv(venv_path)
+                if not venv_created:
+                    # 创建失败，回退到系统 Python
+                    python_exec = sys.executable
+                else:
+                    # 使用虚拟环境的 Python
+                    if sys.platform == "win32":
+                        python_exec = venv_path / "Scripts" / "python.exe"
+                    else:
+                        python_exec = venv_path / "bin" / "python"
             else:
-                python_exec = venv_path / "bin" / "python"
+                # 虚拟环境已存在
+                if sys.platform == "win32":
+                    python_exec = venv_path / "Scripts" / "python.exe"
+                else:
+                    python_exec = venv_path / "bin" / "python"
         else:
             python_exec = sys.executable
         
@@ -168,6 +242,59 @@ class ExecuteCodeTool(BaseTool):
 class PipInstallTool(BaseTool):
     """pip 包安装工具"""
     
+    def _create_venv(self, venv_path: Path) -> bool:
+        """
+        创建虚拟环境（兼容 Anaconda 和标准 Python）
+        与 ExecuteCodeTool 使用相同的策略
+        """
+        venv_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 策略 1: 标准 venv
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "venv", str(venv_path)],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode == 0:
+                return True
+        except Exception:
+            pass
+        
+        # 策略 2: virtualenv（兼容 Anaconda）
+        try:
+            import virtualenv
+            result = subprocess.run(
+                [sys.executable, "-m", "virtualenv", str(venv_path)],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode == 0:
+                return True
+        except ImportError:
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "virtualenv"],
+                    capture_output=True,
+                    timeout=120
+                )
+                result = subprocess.run(
+                    [sys.executable, "-m", "virtualenv", str(venv_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                if result.returncode == 0:
+                    return True
+            except Exception:
+                pass
+        except Exception:
+            pass
+        
+        return False
+    
     def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         在虚拟环境中安装 Python 包
@@ -197,8 +324,13 @@ class PipInstallTool(BaseTool):
             
             # 检查并创建虚拟环境
             if not venv_path.exists():
-                env_dir.mkdir(parents=True, exist_ok=True)
-                subprocess.run([sys.executable, "-m", "venv", str(venv_path)], check=True)
+                venv_created = self._create_venv(venv_path)
+                if not venv_created:
+                    return {
+                        "status": "error",
+                        "output": "",
+                        "error": "无法创建虚拟环境（venv 和 virtualenv 都失败）"
+                    }
             
             # 获取虚拟环境的 pip
             if sys.platform == "win32":
