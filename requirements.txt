@@ -3,5 +3,20 @@
 # 核心依赖
 litellm>=1.0.0          # 统一的LLM接口
 pyyaml>=6.0             # YAML配置文件解析
-tiktoken
+tiktoken>=0.5.0
+
+# Tool Server 依赖
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+chardet>=5.2.0
+pdfplumber>=0.10.0
+python-docx>=1.1.0
+crawl4ai>=0.3.0         # 网页爬取（会自动安装 playwright）
+ddgs>=1.0.0             # DuckDuckGo 搜索
+arxiv>=2.0.0            # arXiv API
+prompt_toolkit>=3.0.0   # CLI 交互
+rich>=13.0.0            # 终端美化
 

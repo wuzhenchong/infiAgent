@@ -73,7 +73,7 @@ def is_binary_file(file_path: Path) -> bool:
     2. 如果后缀名不在黑名单中，再检查文件内容（准确）
     """
     try:
-        # 策略1：检查文件后缀名
+        # 策略1：检查文件后缀名（快速路径）
         if file_path.suffix.lower() in BINARY_EXTENSIONS:
             return True
         

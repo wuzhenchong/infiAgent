@@ -26,7 +26,9 @@ class ConversationStorage:
         import hashlib
         
         task_hash = hashlib.md5(task_id.encode()).hexdigest()[:8]
-        task_folder = Path(task_id).name if '/' in task_id else task_id
+        # 跨平台路径处理：检查是否是路径（包含/或\）
+        import os
+        task_folder = Path(task_id).name if (os.sep in task_id or '/' in task_id or '\\' in task_id) else task_id
         task_name = f"{task_hash}_{task_folder}"
         
         return str(self.conversations_dir / f"{task_name}_{agent_id}_actions.json")

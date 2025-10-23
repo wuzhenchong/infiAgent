@@ -8,6 +8,55 @@ MLA V3 启动脚本
 import sys
 import argparse
 from pathlib import Path
+import os
+
+# Windows控制台UTF-8编码支持（解决emoji显示问题）
+if sys.platform == 'win32':
+    try:
+        # 设置控制台代码页为UTF-8
+        import codecs
+        # 使用line buffering确保每行立即输出
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+        # 强制无缓冲模式
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True, write_through=True)
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', line_buffering=True, write_through=True)
+    except Exception:
+        pass
+
+# 首次导入时检查PATH配置（仅在非导入模式下）
+if __name__ == "__main__" and not hasattr(sys, '_mla_path_checked'):
+    sys._mla_path_checked = True
+    try:
+        import site
+        # 获取用户级 Scripts 目录
+        if sys.platform == 'win32':
+            user_base = site.USER_BASE
+            if user_base:
+                scripts_dir = os.path.join(user_base, 'Scripts')
+            else:
+                scripts_dir = None
+        else:
+            user_base = site.USER_BASE
+            if user_base:
+                scripts_dir = os.path.join(user_base, 'bin')
+            else:
+                scripts_dir = None
+        
+        if scripts_dir and os.path.exists(scripts_dir):
+            # 检查是否在 PATH 中
+            path_env = os.environ.get('PATH', '')
+            path_dirs = path_env.split(os.pathsep)
+            scripts_dir_normalized = os.path.normpath(scripts_dir).lower()
+            in_path = any(os.path.normpath(p).lower() == scripts_dir_normalized for p in path_dirs)
+            
+            if not in_path:
+                print("\n" + "="*80, file=sys.stderr)
+                print("[提示] 要直接使用 'mla-agent' 命令，请运行: python check_path.py", file=sys.stderr)
+                print("="*80 + "\n", file=sys.stderr)
+    except Exception:
+        pass
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent
@@ -49,15 +98,30 @@ def main():
     
     args = parser.parse_args()
     
+    # Windows命令行参数编码修复
+    if sys.platform == 'win32' and args.user_input:
+        try:
+            # 尝试修复Windows命令行的编码问题
+            # 场景：Windows cmd/PowerShell 可能将 UTF-8 字符错误解析为 Latin-1
+            original = args.user_input
+            fixed = args.user_input.encode('latin-1').decode('utf-8')
+            # 只在修复后看起来更合理时才应用（避免破坏正常输入）
+            if fixed != original:
+                args.user_input = fixed
+        except (UnicodeDecodeError, UnicodeEncodeError, AttributeError) as e:
+            # 如果修复失败，保持原样（不影响正常使用）
+            # 可选：记录日志用于调试
+            # print(f"[调试] 编码修复失败: {e}", file=sys.stderr)
+            pass
+    
     # 处理 confirm 命令
     if args.command == 'confirm':
         import requests
         import yaml
-        from pathlib import Path
         
         # 读取工具服务器地址
         config_path = Path(__file__).parent / "config" / "run_env_config" / "tool_config.yaml"
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             tool_config = yaml.safe_load(f)
         server_url = tool_config.get('tools_server', 'http://127.0.0.1:8001').rstrip('/')
         
@@ -104,7 +168,6 @@ def main():
     
     # JSONL 模式：将所有 print 重定向到 stderr
     if args.jsonl:
-        import sys
         sys.stdout_orig = sys.stdout
         sys.stderr_orig = sys.stderr
         # 所有 print 输出到 stderr
@@ -114,8 +177,11 @@ def main():
     if args.test or (not args.task_id and not args.user_input):
         if not args.jsonl:
             print("🧪 使用默认测试模式")
-        args.task_id = args.task_id or "/Users/chenglin/Desktop/research/agent_framwork/vscode_version/MLA_V3/task_test"
-        args.user_input = args.user_input or "帮我找一篇量子计算的新闻链接"
+        # 跨平台默认task_id：使用用户主目录下的测试目录
+        default_task_dir = Path.home() / "mla_v3" / "task_test"
+        default_task_dir.mkdir(parents=True, exist_ok=True)
+        args.task_id = args.task_id or str(default_task_dir)
+        args.user_input = args.user_input or "刚才完成了什么任务？"
     
     # 检查必需参数
     if not args.task_id or not args.user_input:
@@ -159,7 +225,7 @@ def main():
         hierarchy_manager = get_hierarchy_manager(args.task_id)
         print("✅ 层级管理器初始化成功")
         
-        # ✅ 启动前清理状态
+        # 启动前清理状态
         print("\n🧹 检查并清理状态...")
         
         # 如果指定 --force-new，清空所有状态

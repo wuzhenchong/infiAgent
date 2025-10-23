@@ -205,10 +205,14 @@ class ToolExecutor:
             return result
         
         except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            print(f"❌ 子Agent执行失败: {e}")
+            print(f"详细错误:\n{error_detail}")
             return {
                 "status": "error",
                 "output": "",
-                "error_information": f"子Agent执行失败: {str(e)}"
+                "error_information": f"子Agent执行失败: {str(e)}\n{error_detail}"
             }
 
 

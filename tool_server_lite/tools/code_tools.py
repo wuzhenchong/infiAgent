@@ -136,9 +136,19 @@ class ExecuteCodeTool(BaseTool):
         return output
     
     def _execute_bash(self, code_file: Path, exec_dir: Path, timeout: int) -> str:
-        """执行Bash脚本"""
+        """执行Shell脚本（跨平台）"""
+        import sys
+        
+        if sys.platform == "win32":
+            # Windows: 使用PowerShell或cmd
+            # 将.sh文件转换为.bat或使用PowerShell执行
+            shell_cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(code_file)]
+        else:
+            # Unix/Linux/Mac: 使用bash
+            shell_cmd = ["bash", str(code_file)]
+        
         result = subprocess.run(
-            ["bash", str(code_file)],
+            shell_cmd,
             capture_output=True,
             text=True,
             timeout=timeout,

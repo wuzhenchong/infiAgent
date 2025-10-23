@@ -176,80 +176,67 @@ class InteractiveCLI:
         import shutil
         mla_cmd = shutil.which('mla-agent') or 'mla-agent'
         
-        # 启动子进程（JSONL模式）
+        # 启动子进程（普通模式，不用JSONL）
         self.current_process = subprocess.Popen(
             [
                 mla_cmd,
                 '--task_id', self.task_id,
                 '--agent_name', agent_name,
                 '--user_input', user_input,
-                '--agent_system', self.agent_system,
-                '--jsonl'
+                '--agent_system', self.agent_system
+                # 不传 --jsonl，使用普通输出模式
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            bufsize=1
+            encoding='utf-8',  # 明确指定UTF-8编码，避免Windows下的GBK问题
+            errors='replace',   # 遇到无法解码的字符时替换而不是报错
+            bufsize=1  # 行缓冲
         )
         
-        # 后台线程读取输出
+        # 后台线程读取输出（普通模式，直接显示）
         def read_output():
-            for line in self.current_process.stdout:
-                if not line.strip():
-                    continue
-                
-                try:
-                    import json
-                    event = json.loads(line)
+            try:
+                for line in self.current_process.stdout:
+                    if not line:
+                        continue
+                    line = line.rstrip('\n')
+                    if not line.strip():
+                        continue
                     
-                    # 只显示关键事件
-                    if event['type'] == 'token':
-                        text = event['text']
-                        # 简化显示并保存
-                        if text.startswith('['):
-                            line = f"  💭 {text[:80]}..."
-                        elif '调用工具:' in text:
-                            line = f"  🔧 {text.split(chr(10))[0]}"
-                        elif '完成:' in text:
-                            parts = text.split(' - ', 1)
-                            if len(parts) == 2:
-                                line = f"  ✅ {parts[0]}"
-                            else:
-                                line = None
-                        else:
-                            line = None
-                        
-                        if line:
-                            self.output_lines.append(line)
-                            # 限制行数
-                            if len(self.output_lines) > self.max_output_lines:
-                                self.output_lines.pop(0)
-                            print(line)
-                    
-                    elif event['type'] == 'result':
-                        # 显示完整结果
-                        summary = event['summary']
-                        self.output_lines.append(f"📊 结果: {summary[:100]}...")
-                        
-                        print(f"\n{'='*80}")
-                        print("📊 执行结果:")
-                        print(f"{'='*80}")
-                        print(summary)  # 完整输出
-                        print(f"{'='*80}\n")
-                    
-                    elif event['type'] == 'end':
-                        status_icon = "✅" if event['status'] == 'ok' else "❌"
-                        duration_sec = event['duration_ms'] / 1000
-                        line = f"{status_icon} 任务完成 ({duration_sec:.1f}s)"
-                        self.output_lines.append(line)
-                        print(line)
-                        print()  # 任务完成后空一行
-                
-                except:
-                    pass
+                    # 直接显示输出行
+                    self.output_lines.append(line)
+                    # 限制行数
+                    if len(self.output_lines) > self.max_output_lines:
+                        self.output_lines.pop(0)
+                    print(line)
+            except Exception as e:
+                # 进程结束或其他异常
+                pass
         
         thread = threading.Thread(target=read_output, daemon=True)
         thread.start()
+
+        # 读取 stderr，防止管道阻塞
+        def read_stderr():
+            try:
+                for err in self.current_process.stderr:
+                    if not err:
+                        continue
+                    err = err.rstrip('\n')
+                    if not err.strip():
+                        continue
+                    
+                    # 显示 stderr 输出（错误/警告信息）
+                    self.output_lines.append(err)
+                    if len(self.output_lines) > self.max_output_lines:
+                        self.output_lines.pop(0)
+                    print(err)
+            except Exception:
+                pass
+
+        thread_err = threading.Thread(target=read_stderr, daemon=True)
+        thread_err.start()
     
     def get_bottom_toolbar(self):
         """获取底部工具栏文本"""
