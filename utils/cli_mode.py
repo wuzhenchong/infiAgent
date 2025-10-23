@@ -176,27 +176,28 @@ class InteractiveCLI:
         import shutil
         mla_cmd = shutil.which('mla-agent') or 'mla-agent'
         
-        # 启动子进程（普通模式，不用JSONL）
+        # 启动子进程（JSONL模式 - 实时流式输出）
         self.current_process = subprocess.Popen(
             [
                 mla_cmd,
                 '--task_id', self.task_id,
                 '--agent_name', agent_name,
                 '--user_input', user_input,
-                '--agent_system', self.agent_system
-                # 不传 --jsonl，使用普通输出模式
+                '--agent_system', self.agent_system,
+                '--jsonl'  # JSONL 模式，实时流式输出
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            encoding='utf-8',  # 明确指定UTF-8编码，避免Windows下的GBK问题
-            errors='replace',   # 遇到无法解码的字符时替换而不是报错
-            bufsize=1  # 行缓冲
+            encoding='utf-8',
+            errors='replace',
+            bufsize=0  # 无缓冲，实时输出
         )
         
-        # 后台线程读取输出（普通模式，直接显示）
+        # 后台线程读取输出（JSONL 模式，解析并显示）
         def read_output():
             try:
+                import json
                 for line in self.current_process.stdout:
                     if not line:
                         continue
@@ -204,34 +205,76 @@ class InteractiveCLI:
                     if not line.strip():
                         continue
                     
-                    # 直接显示输出行
-                    self.output_lines.append(line)
-                    # 限制行数
-                    if len(self.output_lines) > self.max_output_lines:
-                        self.output_lines.pop(0)
-                    print(line)
-            except Exception as e:
-                # 进程结束或其他异常
+                    try:
+                        # 解析 JSONL 事件
+                        event = json.loads(line)
+                        
+                        # 只显示关键事件
+                        if event['type'] == 'token':
+                            text = event['text']
+                            # 简化显示
+                            if text.startswith('['):
+                                display_line = f"  💭 {text[:80]}..."
+                            elif '调用工具:' in text:
+                                display_line = f"  🔧 {text.split(chr(10))[0]}"
+                            elif '完成:' in text:
+                                parts = text.split(' - ', 1)
+                                if len(parts) == 2:
+                                    display_line = f"  ✅ {parts[0]}"
+                                else:
+                                    display_line = None
+                            else:
+                                display_line = None
+                            
+                            if display_line:
+                                self.output_lines.append(display_line)
+                                if len(self.output_lines) > self.max_output_lines:
+                                    self.output_lines.pop(0)
+                                print(display_line)
+                        
+                        elif event['type'] == 'result':
+                            # 显示完整结果
+                            summary = event.get('summary', '')
+                            self.output_lines.append(f"📊 结果: {summary[:100]}...")
+                            
+                            print(f"\n{'='*80}")
+                            print("📊 执行结果:")
+                            print(f"{'='*80}")
+                            print(summary)
+                            print(f"{'='*80}\n")
+                        
+                        elif event['type'] == 'end':
+                            status_icon = "✅" if event.get('status') == 'ok' else "❌"
+                            duration_sec = event.get('duration_ms', 0) / 1000
+                            display_line = f"{status_icon} 任务完成 ({duration_sec:.1f}s)"
+                            self.output_lines.append(display_line)
+                            print(display_line)
+                            print()
+                    
+                    except json.JSONDecodeError:
+                        # 不是有效的 JSON，跳过
+                        pass
+            except Exception:
                 pass
         
         thread = threading.Thread(target=read_output, daemon=True)
         thread.start()
 
-        # 读取 stderr，防止管道阻塞
+        # 读取 stderr，防止管道阻塞（但不显示，因为 JSONL 模式下 print 被重定向到 stderr）
         def read_stderr():
             try:
                 for err in self.current_process.stderr:
                     if not err:
                         continue
+                    # 静默消费 stderr，防止管道写满阻塞
+                    # 只在遇到真正的错误关键词时才显示
                     err = err.rstrip('\n')
-                    if not err.strip():
-                        continue
-                    
-                    # 显示 stderr 输出（错误/警告信息）
-                    self.output_lines.append(err)
-                    if len(self.output_lines) > self.max_output_lines:
-                        self.output_lines.pop(0)
-                    print(err)
+                    if any(keyword in err for keyword in ['Error:', 'Exception:', 'Traceback', 'CRITICAL', 'FATAL']):
+                        error_line = f"⚠️ {err[:200]}"
+                        self.output_lines.append(error_line)
+                        if len(self.output_lines) > self.max_output_lines:
+                            self.output_lines.pop(0)
+                        print(error_line)
             except Exception:
                 pass
 
