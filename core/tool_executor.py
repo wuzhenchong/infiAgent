@@ -105,6 +105,11 @@ class ToolExecutor:
             
             elif tool_type == "llm_call_agent":
                 # 子Agent - 递归调用
+                # 给 task_input 添加随机后缀（避免同样输入的缓存冲突）
+                import uuid
+                original_input = arguments.get("task_input", "")
+                random_suffix = f" [call-{uuid.uuid4().hex[:8]}]"
+                arguments["task_input"] = original_input + random_suffix
                 return self._execute_sub_agent(tool_name, tool_config, arguments, task_id)
             
             else:

@@ -17,6 +17,7 @@ test_api() {
         -H "Content-Type: application/json" \
         -d "$data")
     if echo "$response" | grep -q '"success":true'; then
+        echo $response
         echo "✅"
     else
         echo "❌"
