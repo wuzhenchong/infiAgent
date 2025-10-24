@@ -366,20 +366,38 @@ def server_status():
 
 
 def server_stop():
-    """停止服务器"""
-    pid = get_server_pid()
-    
-    if not pid:
-        print("ℹ️  服务器未运行")
-        return
-    
+    """停止服务器（杀掉所有匹配进程）"""
     import subprocess
     import signal
     import os
     
     try:
-        os.kill(pid, signal.SIGTERM)
-        print(f"✅ Tool Server 已停止 (PID: {pid})")
+        # 获取所有匹配的进程 PID
+        result = subprocess.run(
+            ["pgrep", "-f", "tool_server_lite.*server.py"],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0 or not result.stdout.strip():
+            print("ℹ️  服务器未运行")
+            return
+        
+        # 杀掉所有进程
+        pids = [int(pid) for pid in result.stdout.strip().split('\n') if pid.strip()]
+        killed_count = 0
+        
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                print(f"✅ 已停止进程: {pid}")
+                killed_count += 1
+            except Exception as e:
+                print(f"⚠️  停止 PID {pid} 失败: {e}")
+        
+        if killed_count > 0:
+            print(f"✅ Tool Server 已停止（共 {killed_count} 个进程）")
+        
     except Exception as e:
         print(f"❌ 停止失败: {e}")
 
