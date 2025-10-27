@@ -21,3 +21,5 @@ arxiv>=2.0.0            # arXiv API
 prompt_toolkit>=3.0.0   # CLI 交互
 rich>=13.0.0            # 终端美化
 
+playwright>=1.40.0
+

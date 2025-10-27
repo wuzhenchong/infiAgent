@@ -390,10 +390,10 @@ tools:
       - dir_create
       - file_read
       - file_write
-      - google_search
+      - web_search
       - google_scholar_search
       - crawl_page
-      - parse_document
+      - summary_from_one_paper
       - get_searchPdf_by_doi_or_title
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219

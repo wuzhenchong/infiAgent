@@ -21,7 +21,7 @@ def load_convert_api_config() -> str:
         config_path = Path(__file__).parent.parent.parent / "config" / "run_env_config" / "document_convert_api.yaml"
         
         if not config_path.exists():
-            return "http://192.168.31.4:8000/"  # 默认地址
+            return "如果有的话:8000/"  # 默认地址
         
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
