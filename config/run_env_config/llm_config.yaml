@@ -2,6 +2,6 @@ temperature: 0
 max_tokens: 0
 max_context_window: 200000
 base_url: https://openrouter.ai/api/v1
-api_key: sk-or-v1-REDACTED
+api_key: 
 models:
 - openai/openai/gpt-4o
