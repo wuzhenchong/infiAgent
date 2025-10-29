@@ -5,7 +5,7 @@ tools:
     level: 0
     type: tool_call_agent
     name: "file_read"
-    description: "读取指定文件的内容。可以读取整个文件或指定起始和结束行。默认返回带行号的 JSON 格式。警告：不要读取二进制文件（如 pdf、图片等）。"
+    description: "读取指定文件的内容。可以读取整个文件或指定起始和结束行。默认返回带行号的 JSON 格式。警告：不要读取二进制文件（如 pdf,docx、图片等）。"
     parameters:
       type: "object"
       properties:

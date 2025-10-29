@@ -15,6 +15,7 @@ tools:
       - dir_list
       - dir_create
       - summary_from_one_paper
+      - answer_from_one_paper
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
     prompts:

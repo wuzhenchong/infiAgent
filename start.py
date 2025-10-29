@@ -140,7 +140,7 @@ def main():
                 return 0
             else:
                 print(f"❌ 完成失败: {result.get('error', 'Unknown error')}")
-                return 1
+                return 1 
         except Exception as e:
             print(f"❌ 连接工具服务器失败: {e}")
             return 1

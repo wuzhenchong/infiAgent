@@ -13,7 +13,7 @@ tools:
     model_type: claude-3-7-sonnet-20250219
     prompts:    
       agent_responsibility: |
-        你的职责是根据问题从文章中得到答案
+        你的职责是根据问题从文章(文档）中得到答案，格式可以是 word，pdf 等
       agent_workflow: |
         **你的流程:**
         1. 你应该根据提供的论文地址，读取论文内容，并根据问题从文章中得到答案，如果有必要提供数学公式，应该使用 latex 风格。你应该输出一个 json 文件，文件名命名规则参考提示词！
@@ -133,7 +133,7 @@ tools:
     model_type: claude-3-7-sonnet-20250219
     prompts:
       agent_responsibility: |
-        你的职责是提炼一篇文章内容
+        你的职责是提炼一篇文章内容,格式可以是word 文档或者 pdf 文档
       agent_workflow: |
         **你的流程:**
         1. 你应该根据提供的论文地址，读取论文内容，然后将文章分成几个部分，比如 introduction，abstract 等，对每个部分进行summary，主要说明这部分做了什么，结果等。你应该输出一个 json 文件。文件命名尽量包含你总结的文件名。
