@@ -4,4 +4,4 @@ max_context_window: 200000
 base_url: https://openrouter.ai/api/v1
 api_key: 
 models:
-- openai/openai/gpt-4o
+- openai/anthropic/claude-sonnet-4.5
