@@ -13,7 +13,9 @@ if sys.platform == 'win32':
         # 强制行缓冲和立即写入，避免输出延迟
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True, write_through=True)
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', line_buffering=True, write_through=True)
-    except Exception:
+    except Exception as e:
+        # 如果设置失败，使用默认编码（静默失败）
+        # 这可能发生在某些特殊的控制台环境中
         pass
 
 from fastapi import FastAPI, HTTPException
@@ -364,14 +366,24 @@ def get_server_pid() -> int:
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
                 cmdline = proc.info.get('cmdline')
-                if cmdline and 'python' in proc.info.get('name', '').lower():
-                    # 检查命令行是否包含 tool_server_lite/server.py
-                    cmdline_str = ' '.join(cmdline) if cmdline else ''
-                    if 'tool_server_lite' in cmdline_str and 'server.py' in cmdline_str:
-                        # 排除当前进程（包含status/start命令的）
-                        if any(cmd in cmdline_str for cmd in ['status', 'start', 'stop', 'restart']):
-                            continue
-                        return proc.info['pid']
+                if not cmdline or len(cmdline) < 2:
+                    continue
+                
+                # 检查是否是 Python 进程
+                if 'python' not in proc.info.get('name', '').lower():
+                    continue
+                
+                # 检查脚本路径是否包含 tool_server_lite/server.py
+                script_path = cmdline[1] if len(cmdline) > 1 else ''
+                if 'tool_server_lite' not in script_path or 'server.py' not in script_path:
+                    continue
+                
+                # 检查命令行参数中是否包含管理命令（status/start/stop/restart）
+                # 这些是在参数位置（cmdline[2:]）而不是路径中
+                if any(cmd in cmdline[2:] for cmd in ['status', 'start', 'stop', 'restart']):
+                    continue
+                
+                return proc.info['pid']
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
     except ImportError:
@@ -447,7 +459,7 @@ def server_start_daemon(host="0.0.0.0", port=8001):
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 creationflags=CREATE_NO_WINDOW,
-                close_fds=False
+                close_fds=False  # Windows不关闭继承的句柄
             )
         else:
             # Unix/Linux/Mac: 使用标准后台启动
@@ -458,10 +470,11 @@ def server_start_daemon(host="0.0.0.0", port=8001):
                 start_new_session=True
             )
         
+        # 父进程关闭文件句柄，子进程已经继承了文件描述符
+        log_handle.close()
+        
         print(f"[INFO] 后台进程已启动 (PID: {process.pid})")
         print(f"[LOG] 日志文件: {log_file}")
-        
-        # 不要关闭log_handle，让子进程继续使用
     except Exception as e:
         print(f"❌ 启动失败: {e}")
         import traceback

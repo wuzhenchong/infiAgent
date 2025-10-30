@@ -11,7 +11,6 @@ import subprocess
 import threading
 import queue
 import signal
-import platform
 
 try:
     from prompt_toolkit import PromptSession, print_formatted_text
@@ -157,7 +156,7 @@ class InteractiveCLI:
         """停止当前运行的任务"""
         if self.current_process and self.current_process.poll() is None:
             try:
-                if platform.system() == 'Windows':
+                if sys.platform == 'win32':
                     # Windows: 发送 Ctrl+Break 信号
                     self.current_process.send_signal(signal.CTRL_BREAK_EVENT)
                     try:
@@ -176,7 +175,7 @@ class InteractiveCLI:
                 try:
                     self.current_process.kill()
                     self.current_process.wait(timeout=1)
-                except:
+                except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError):
                     pass
     
     def run_task(self, agent_name: str, user_input: str):
@@ -207,7 +206,7 @@ class InteractiveCLI:
             'bufsize': 0  # 无缓冲，实时输出
         }
         
-        if platform.system() == 'Windows':
+        if sys.platform == 'win32':
             # Windows: 创建新的进程组，允许发送 Ctrl+Break
             popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
         
@@ -345,7 +344,7 @@ class InteractiveCLI:
                     if self.current_process and self.current_process.poll() is None:
                         print("\n⏹️  正在停止运行中的任务...")
                         try:
-                            if platform.system() == 'Windows':
+                            if sys.platform == 'win32':
                                 self.current_process.send_signal(signal.CTRL_BREAK_EVENT)
                                 try:
                                     self.current_process.wait(timeout=2)
@@ -356,11 +355,11 @@ class InteractiveCLI:
                                 self.current_process.terminate()
                                 self.current_process.wait(timeout=3)
                             print("✅ 任务已停止")
-                        except:
+                        except (subprocess.TimeoutExpired, ProcessLookupError):
                             try:
                                 self.current_process.kill()
                                 print("✅ 任务已强制终止")
-                            except:
+                            except (ProcessLookupError, PermissionError):
                                 pass
                     print("\n👋 再见！\n")
                     break
@@ -391,7 +390,7 @@ class InteractiveCLI:
                 if self.current_process and self.current_process.poll() is None:
                     print("\n\n⚠️  正在中断任务...")
                     try:
-                        if platform.system() == 'Windows':
+                        if sys.platform == 'win32':
                             # Windows: 发送 Ctrl+Break 信号
                             self.current_process.send_signal(signal.CTRL_BREAK_EVENT)
                             try:
@@ -400,7 +399,7 @@ class InteractiveCLI:
                                 self.current_process.terminate()
                                 try:
                                     self.current_process.wait(timeout=1)
-                                except:
+                                except (subprocess.TimeoutExpired, ProcessLookupError):
                                     self.current_process.kill()
                         else:
                             # Unix/Mac: 使用 terminate
@@ -412,7 +411,7 @@ class InteractiveCLI:
                     except Exception:
                         try:
                             self.current_process.kill()
-                        except:
+                        except (ProcessLookupError, PermissionError):
                             pass
                     print("✅ 任务已中断\n")
                     print("💡 输入相同内容可续跑，输入新内容开始新任务\n")
@@ -424,7 +423,7 @@ class InteractiveCLI:
                 if self.current_process and self.current_process.poll() is None:
                     print("\n\n⏹️  正在停止运行中的任务...")
                     try:
-                        if platform.system() == 'Windows':
+                        if sys.platform == 'win32':
                             self.current_process.send_signal(signal.CTRL_BREAK_EVENT)
                             try:
                                 self.current_process.wait(timeout=2)
@@ -434,10 +433,10 @@ class InteractiveCLI:
                         else:
                             self.current_process.terminate()
                             self.current_process.wait(timeout=3)
-                    except:
+                    except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError):
                         try:
                             self.current_process.kill()
-                        except:
+                        except (ProcessLookupError, PermissionError):
                             pass
                 print("\n\n👋 再见！\n")
                 break
