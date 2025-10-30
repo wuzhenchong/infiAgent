@@ -437,8 +437,8 @@ def server_stop():
                 
                 script_path = cmdline[1] if len(cmdline) > 1 else ''
                 if 'tool_server_lite' in script_path and 'server.py' in script_path:
-                    # 排除管理命令
-                    if any(cmd in cmdline for cmd in ['status', 'start', 'stop', 'restart']):
+                    # 排除管理命令（只检查参数部分 cmdline[2:]，避免误判路径中的关键词）
+                    if any(cmd in cmdline[2:] for cmd in ['status', 'start', 'stop', 'restart']):
                         continue
                     
                     pid = proc.info['pid']
