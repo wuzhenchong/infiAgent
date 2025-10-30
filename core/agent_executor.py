@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 Agent执行器 - 使用XML结构化上下文的核心执行逻辑
@@ -51,11 +52,11 @@ class AgentExecutor:
         available_models = self.llm_client.models
         if self.model_type not in available_models:
             fallback_model = available_models[0]
-            print(f"⚠️  请求的模型 '{self.model_type}' 不在可用列表中")
-            print(f"✅ 使用回退模型: {fallback_model}")
+            safe_print(f"⚠️  请求的模型 '{self.model_type}' 不在可用列表中")
+            safe_print(f"✅ 使用回退模型: {fallback_model}")
             self.model_type = fallback_model
         else:
-            print(f"✅ 使用请求的模型: {self.model_type}")
+            safe_print(f"✅ 使用请求的模型: {self.model_type}")
         
         # 初始化上下文构造器（负责完整上下文构建）
         self.context_builder = ContextBuilder(
@@ -85,10 +86,10 @@ class AgentExecutor:
     
     def run(self, task_id: str, user_input: str) -> Dict:
         """执行Agent任务"""
-        print(f"\n{'='*80}")
-        print(f"🤖 启动Agent: {self.agent_name}")
-        print(f"📝 任务: {user_input[:100]}...")
-        print(f"{'='*80}\n")
+        safe_print(f"\n{'='*80}")
+        safe_print(f"🤖 启动Agent: {self.agent_name}")
+        safe_print(f"📝 任务: {user_input[:100]}...")
+        safe_print(f"{'='*80}\n")
         
         # Agent入栈
         self.agent_id = self.hierarchy_manager.push_agent(self.agent_name, user_input)
@@ -104,32 +105,32 @@ class AgentExecutor:
             self.first_thinking_done = loaded_data.get("first_thinking_done", False)
             self.tool_call_counter = loaded_data.get("tool_call_counter", 0)
             start_turn = loaded_data.get("current_turn", 0) + 1
-            print(f"📂 已加载对话历史，从第 {start_turn + 1} 轮继续")
-            print(f"   渲染历史: {len(self.action_history)}条, 完整轨迹: {len(self.action_history_fact)}条")
+            safe_print(f"📂 已加载对话历史，从第 {start_turn + 1} 轮继续")
+            safe_print(f"   渲染历史: {len(self.action_history)}条, 完整轨迹: {len(self.action_history_fact)}条")
             
             # 检查是否已经完成（有final_output）
             for action in self.action_history_fact:
                 if action.get("tool_name") == "final_output":
                     final_result = action.get("result", {})
-                    print(f"\n✅ 任务已完成，直接返回之前的final_output结果")
-                    print(f"   状态: {final_result.get('status')}")
+                    safe_print(f"\n✅ 任务已完成，直接返回之前的final_output结果")
+                    safe_print(f"   状态: {final_result.get('status')}")
                     return final_result
             
             # 恢复pending工具（如果有）
             if self.pending_tools:
-                print(f"🔄 发现{len(self.pending_tools)}个pending工具，恢复执行...")
+                safe_print(f"🔄 发现{len(self.pending_tools)}个pending工具，恢复执行...")
                 self._recover_pending_tools(task_id)
         
         # 首次thinking（初始规划）
         if start_turn == 0 and not self.first_thinking_done:
-            print(f"[{self.agent_name}] 开始行动前进行初始规划...")
+            safe_print(f"[{self.agent_name}] 开始行动前进行初始规划...")
             thinking_result = self._trigger_thinking(task_id, user_input, is_first=True)
             if thinking_result:
                 self.latest_thinking = thinking_result
                 self.first_thinking_done = True
                 self.hierarchy_manager.update_thinking(self.agent_id, thinking_result)
                 self._save_state(task_id, user_input, 0)
-                print(f"[{self.agent_name}] 初始规划完成")
+                safe_print(f"[{self.agent_name}] 初始规划完成")
                 
                 # 发送 thinking 事件（完整内容）
                 emitter = get_event_emitter()
@@ -141,7 +142,7 @@ class AgentExecutor:
         
         # 执行循环
         for turn in range(start_turn, self.max_turns):
-            print(f"\n--- 第 {turn + 1}/{self.max_turns} 轮执行 ---")
+            safe_print(f"\n--- 第 {turn + 1}/{self.max_turns} 轮执行 ---")
             
             try:
                 # 每轮开始前保存状态
@@ -162,9 +163,9 @@ class AgentExecutor:
                 # 调用LLM（history永远只有一条）
                 history = [ChatMessage(role="user", content="请输出下一个动作")]
                 
-                print(f"🤖 调用LLM: {self.model_type}")
-                print(f"   📝 System Prompt长度: {len(full_system_prompt)} 字符")
-                print(f"   🔧 可用工具: {len(self.available_tools)} 个")
+                safe_print(f"🤖 调用LLM: {self.model_type}")
+                safe_print(f"   📝 System Prompt长度: {len(full_system_prompt)} 字符")
+                safe_print(f"   🔧 可用工具: {len(self.available_tools)} 个")
                 
                 llm_response = self.llm_client.chat(
                     history=history,
@@ -183,15 +184,15 @@ class AgentExecutor:
                     self.hierarchy_manager.pop_agent(self.agent_id, str(error_result))
                     return error_result
                 
-                print(f"📥 LLM输出: {llm_response.output[:100]}...")
-                print(f"🔧 工具调用数量: {len(llm_response.tool_calls)}")
+                safe_print(f"📥 LLM输出: {llm_response.output[:100]}...")
+                safe_print(f"🔧 工具调用数量: {len(llm_response.tool_calls)}")
                 
                 # 检查是否有工具调用
                 if not llm_response.tool_calls:
                     # 强制工具调用机制
                     if max_tool_try < 5:
                         max_tool_try += 1
-                        print(f"⚠️ LLM未调用工具，第{max_tool_try}/5次提醒")
+                        safe_print(f"⚠️ LLM未调用工具，第{max_tool_try}/5次提醒")
                         # 下一轮会在XML上下文中看到之前的失败记录
                         # 可以选择在action_history中添加一个标记
                         self.action_history.append({
@@ -206,7 +207,7 @@ class AgentExecutor:
                         continue
                     else:
                         # 5次后仍不调用，触发thinking并报错
-                        print("❌ 5次提醒后仍未调用工具，触发thinking分析")
+                        safe_print("❌ 5次提醒后仍未调用工具，触发thinking分析")
                         thinking_result = self._trigger_thinking(task_id, user_input, is_first=False)
                         
                         # 发送 thinking 事件（完整内容）
@@ -227,8 +228,8 @@ class AgentExecutor:
                 
                 # 执行所有工具调用
                 for tool_call in llm_response.tool_calls:
-                    print(f"\n🔧 执行工具: {tool_call.name}")
-                    print(f"📋 参数: {tool_call.arguments}")
+                    safe_print(f"\n🔧 执行工具: {tool_call.name}")
+                    safe_print(f"📋 参数: {tool_call.arguments}")
                     
                     # 发送工具调用事件（JSONL模式）
                     emitter = get_event_emitter()
@@ -257,7 +258,7 @@ class AgentExecutor:
                     # ✅ 执行后从pending移除
                     self.pending_tools = [t for t in self.pending_tools if t["id"] != tool_call.id]
                     
-                    print(f"✅ 结果: {tool_result.get('status', 'unknown')}")
+                    safe_print(f"✅ 结果: {tool_result.get('status', 'unknown')}")
                     
                     # 发送工具结果事件（JSONL模式）
                     emitter = get_event_emitter()
@@ -289,17 +290,17 @@ class AgentExecutor:
                     
                     # 如果是final_output，返回结果
                     if tool_call.name == "final_output":
-                        print(f"\n{'='*80}")
-                        print(f"✅ Agent完成: {self.agent_name}")
-                        print(f"📊 状态: {tool_result.get('status', 'unknown')}")
-                        print(f"{'='*80}\n")
+                        safe_print(f"\n{'='*80}")
+                        safe_print(f"✅ Agent完成: {self.agent_name}")
+                        safe_print(f"📊 状态: {tool_result.get('status', 'unknown')}")
+                        safe_print(f"{'='*80}\n")
                         
                         self.hierarchy_manager.pop_agent(self.agent_id, tool_result.get("output", ""))
                         return tool_result
                 
                 # 检查是否该触发thinking（每N轮工具调用）
                 if self.tool_call_counter % self.thinking_interval == 0:
-                    print(f"[{self.agent_name}] 第{self.tool_call_counter}轮工具调用，触发thinking分析")
+                    safe_print(f"[{self.agent_name}] 第{self.tool_call_counter}轮工具调用，触发thinking分析")
                     thinking_result = self._trigger_thinking(task_id, user_input, is_first=False)
                     if thinking_result:
                         self.latest_thinking = thinking_result
@@ -310,10 +311,10 @@ class AgentExecutor:
                         emitter = get_event_emitter()
                         if emitter.enabled:
                             emitter.token(f"[{self.agent_name}] 进度分析: {thinking_result}")
-                        print(f"[{self.agent_name}] Thinking分析已更新")
+                        safe_print(f"[{self.agent_name}] Thinking分析已更新")
             
             except Exception as e:
-                print(f"❌ 执行出错: {e}")
+                safe_print(f"❌ 执行出错: {e}")
                 import traceback
                 traceback.print_exc()
                 
@@ -326,7 +327,7 @@ class AgentExecutor:
                 return error_result
         
         # 超过最大轮次
-        print(f"\n⚠️ 达到最大轮次限制: {self.max_turns}")
+        safe_print(f"\n⚠️ 达到最大轮次限制: {self.max_turns}")
         timeout_result = {
             "status": "error",
             "output": "执行超过最大轮次限制",
@@ -376,7 +377,7 @@ class AgentExecutor:
                     tool_call_counter=self.tool_call_counter
                 )
         except Exception as e:
-            print(f"⚠️ Thinking触发失败: {e}")
+            safe_print(f"⚠️ Thinking触发失败: {e}")
             import traceback
             traceback.print_exc()
             return ""
@@ -401,11 +402,11 @@ class AgentExecutor:
             
             # 如果发生了压缩，替换
             if len(compressed) < len(self.action_history):
-                print(f"✅ 历史动作已压缩: {len(self.action_history)}条 → {len(compressed)}条")
+                safe_print(f"✅ 历史动作已压缩: {len(self.action_history)}条 → {len(compressed)}条")
                 self.action_history = compressed
         
         except Exception as e:
-            print(f"⚠️ 压缩失败: {e}")
+            safe_print(f"⚠️ 压缩失败: {e}")
             import traceback
             traceback.print_exc()
     
@@ -413,8 +414,8 @@ class AgentExecutor:
         """恢复pending状态的工具调用"""
         for pending_tool in self.pending_tools[:]:  # 复制列表
             try:
-                print(f"   🔄 恢复执行: {pending_tool['name']}")
-                print(f"   📋 参数: {pending_tool['arguments']}")
+                safe_print(f"   🔄 恢复执行: {pending_tool['name']}")
+                safe_print(f"   📋 参数: {pending_tool['arguments']}")
                 
                 # 发送恢复事件（JSONL模式）
                 emitter = get_event_emitter()
@@ -443,14 +444,14 @@ class AgentExecutor:
                 # 从pending移除
                 self.pending_tools.remove(pending_tool)
                 
-                print(f"   ✅ 恢复完成: {pending_tool['name']}")
+                safe_print(f"   ✅ 恢复完成: {pending_tool['name']}")
                 
                 # 如果是final_output，直接返回
                 if pending_tool["name"] == "final_output":
                     return tool_result
             
             except Exception as e:
-                print(f"   ❌ 恢复失败: {pending_tool['name']} - {e}")
+                safe_print(f"   ❌ 恢复失败: {pending_tool['name']} - {e}")
         
         # 清空pending列表
         self.pending_tools = []
@@ -503,5 +504,5 @@ if __name__ == "__main__":
     # 获取writing_agent配置
     agent_config = config_loader.get_tool_config("writing_agent")
     
-    print(f"✅ Agent配置: {agent_config.get('name')}")
-    print(f"   Tools: {len(agent_config.get('available_tools', []))}")
+    safe_print(f"✅ Agent配置: {agent_config.get('name')}")
+    safe_print(f"   Tools: {len(agent_config.get('available_tools', []))}")

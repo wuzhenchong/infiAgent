@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 状态清理器 - 启动前清理栈和current状态
@@ -34,14 +35,14 @@ def clean_before_start(task_id: str, new_user_input: str = None):
         
         # 检查是否有current数据
         if not context.get("current") or not context["current"].get("agents_status"):
-            print("ℹ️ 无需清理，状态为空")
+            safe_print("ℹ️ 无需清理，状态为空")
             return
         
         current_agents = context["current"]["agents_status"]
         current_hierarchy = context["current"]["hierarchy"]
         
-        print(f"🧹 启动前清理状态...")
-        print(f"   当前agents数量: {len(current_agents)}")
+        safe_print(f"🧹 启动前清理状态...")
+        safe_print(f"   当前agents数量: {len(current_agents)}")
         
         # 检查用户输入是否改变
         last_instruction = context["current"].get("instructions", [])
@@ -51,7 +52,7 @@ def clean_before_start(task_id: str, new_user_input: str = None):
             last_input = last_instruction[-1].get("instruction", "")
             is_same_task = (last_input == new_user_input)
             if is_same_task:
-                print(f"   ℹ️ 检测到相同任务，将续跑")
+                safe_print(f"   ℹ️ 检测到相同任务，将续跑")
         
         # 分类：completed vs running
         completed_agents = {}
@@ -65,12 +66,12 @@ def clean_before_start(task_id: str, new_user_input: str = None):
                 completed_agents[agent_id] = agent_info
                 if agent_id in current_hierarchy:
                     completed_hierarchy[agent_id] = current_hierarchy[agent_id]
-                print(f"   ✅ 保留已完成: {agent_info.get('agent_name')}")
+                safe_print(f"   ✅ 保留已完成: {agent_info.get('agent_name')}")
             else:
                 # 收集运行中的（准备归档）
                 running_agents[agent_id] = agent_info
                 running_count += 1
-                print(f"   📦 归档运行中: {agent_info.get('agent_name')}")
+                safe_print(f"   📦 归档运行中: {agent_info.get('agent_name')}")
         
         # 清理completed agents的children引用（移除running的children）
         for agent_id, hierarchy_info in completed_hierarchy.items():
@@ -141,9 +142,9 @@ def clean_before_start(task_id: str, new_user_input: str = None):
                 }
                 
                 context["history"].append(history_entry)
-                print(f"   📦 已将中断任务归档到 history")
-                print(f"      顶层 agent: {agent_info.get('agent_name')}")
-                print(f"      子任务数: {len(children_outputs)}")
+                safe_print(f"   📦 已将中断任务归档到 history")
+                safe_print(f"      顶层 agent: {agent_info.get('agent_name')}")
+                safe_print(f"      子任务数: {len(children_outputs)}")
         
         # 更新context
         if not is_same_task:
@@ -154,14 +155,14 @@ def clean_before_start(task_id: str, new_user_input: str = None):
             # 删除压缩的历史（如果有）
             if "_compressed_user_agent_history" in context["current"]:
                 del context["current"]["_compressed_user_agent_history"]
-            print(f"   🗑️ 清空 current，准备新任务")
+            safe_print(f"   🗑️ 清空 current，准备新任务")
         else:
             # 续跑：保留 running agents
             context["current"]["agents_status"] = {**completed_agents, **running_agents}
             # hierarchy 保留所有
-            print(f"   ♻️ 保留 running agents，继续任务")
-            print(f"      Running: {running_count} 个")
-            print(f"      Completed: {len(completed_agents)} 个")
+            safe_print(f"   ♻️ 保留 running agents，继续任务")
+            safe_print(f"      Running: {running_count} 个")
+            safe_print(f"      Completed: {len(completed_agents)} 个")
         
         # 保存
         hierarchy_manager._save_context(context)
@@ -169,13 +170,13 @@ def clean_before_start(task_id: str, new_user_input: str = None):
         # 清空栈
         hierarchy_manager._save_stack([])
         
-        print(f"✅ 清理完成:")
-        print(f"   保留: {len(completed_agents)} 个已完成agent")
-        print(f"   删除: {running_count} 个运行中agent")
-        print(f"   栈已清空")
+        safe_print(f"✅ 清理完成:")
+        safe_print(f"   保留: {len(completed_agents)} 个已完成agent")
+        safe_print(f"   删除: {running_count} 个运行中agent")
+        safe_print(f"   栈已清空")
     
     except Exception as e:
-        print(f"⚠️ 清理失败: {e}")
+        safe_print(f"⚠️ 清理失败: {e}")
         import traceback
         traceback.print_exc()
 

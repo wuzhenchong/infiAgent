@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 上下文构造器 - 构建新的XML结构化上下文
@@ -169,10 +170,10 @@ class ContextBuilder:
         
         compressed_history = current.get("_compressed_user_agent_history")
         if compressed_history:
-            print("✅ 使用已有的压缩历史交互")
+            safe_print("✅ 使用已有的压缩历史交互")
             return compressed_history
         
-        print("🔄 首次压缩历史交互...")
+        safe_print("🔄 首次压缩历史交互...")
         compressed_result = self._compress_user_agent_history_with_llm(history, task_id)
         
         context["current"]["_compressed_user_agent_history"] = compressed_result
@@ -258,7 +259,7 @@ class ContextBuilder:
 
         output_text = response.output
         
-        print(f"✅ 历史交互压缩成功，长度: {len(output_text)} 字符")
+        safe_print(f"✅ 历史交互压缩成功，长度: {len(output_text)} 字符")
         
         return output_text
     
@@ -461,7 +462,7 @@ class ContextBuilder:
                     if thinking:
                         return thinking
         except Exception as e:
-            print(f"⚠️ 读取thinking失败: {e}")
+            safe_print(f"⚠️ 读取thinking失败: {e}")
         
         # 备用：从share_context读取
         agents_status = current.get("agents_status", {})
@@ -497,7 +498,7 @@ class ContextBuilder:
                         data = json.load(f)
                         action_history = data.get("action_history", [])
             except Exception as e:
-                print(f"⚠️ 读取action_history失败: {e}")
+                safe_print(f"⚠️ 读取action_history失败: {e}")
         
         if not action_history:
             return "(无历史动作)"
@@ -554,15 +555,15 @@ if __name__ == "__main__":
     manager.update_thinking(agent_id, "我需要先创建文件，然后写入内容")
     manager.add_action(agent_id, {
         "tool_name": "file_write",
-        "arguments": {"path": "hello.py", "content": "print('hello')"},
+        "arguments": {"path": "hello.py", "content": "safe_print('hello')"},
         "result": {"status": "success", "output": "文件已创建"}
     })
     
     builder = ContextBuilder(manager)
     context = builder.build_context(agent_id, "test_agent", "生成hello.py文件")
     
-    print("=" * 80)
-    print("生成的上下文:")
-    print("=" * 80)
-    print(context)
+    safe_print("=" * 80)
+    safe_print("生成的上下文:")
+    safe_print("=" * 80)
+    safe_print(context)
 

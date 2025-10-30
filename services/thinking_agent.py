@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 Thinking Agent - 任务进展分析服务
@@ -87,7 +88,7 @@ Agent的系统提示词和工作流程：
                 return f"[初始规划失败: {response.error_information}]"
         
         except Exception as e:
-            print(f"⚠️ 首次thinking失败: {e}")
+            safe_print(f"⚠️ 首次thinking失败: {e}")
             return f"[初始规划失败: {str(e)}]"
     
     def analyze_progress(self, task_description: str, agent_system_prompt: str,
@@ -143,7 +144,7 @@ Agent的完整上下文（包含系统角色、历史动作等）：
                 return f"[进度分析失败: {response.error_information}]"
         
         except Exception as e:
-            print(f"⚠️ 进度分析失败: {e}")
+            safe_print(f"⚠️ 进度分析失败: {e}")
             return f"[进度分析失败: {str(e)}]"
 
 
@@ -157,7 +158,7 @@ if __name__ == "__main__":
         available_tools=["file_write", "execute_code"]
     )
     
-    print("="*80)
-    print(result)
-    print("="*80)
+    safe_print("="*80)
+    safe_print(result)
+    safe_print("="*80)
 

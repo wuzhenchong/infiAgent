@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 上下文压缩服务 - 智能压缩历史动作
@@ -22,7 +23,7 @@ try:
     HAS_TIKTOKEN = True
 except ImportError:
     HAS_TIKTOKEN = False
-    print("⚠️ tiktoken未安装，将使用简单估算方法")
+    safe_print("⚠️ tiktoken未安装，将使用简单估算方法")
 
 
 class ContextCompressor:
@@ -77,7 +78,7 @@ class ContextCompressor:
             single_tokens = self.count_tokens(json.dumps(single_action, ensure_ascii=False))
             
             if single_tokens > max_allowed_tokens - 20000:
-                print(f"🔄 单条action过大 ({single_tokens} tokens)，进行分段压缩")
+                safe_print(f"🔄 单条action过大 ({single_tokens} tokens)，进行分段压缩")
                 return [self._compress_large_action(single_action, max_allowed_tokens - 20000)]
             else:
                 return action_history
@@ -91,7 +92,7 @@ class ContextCompressor:
         
         if recent_tokens > max_allowed_tokens - 20000:
             # 最近一条本身就太大，需要压缩
-            print(f"🔄 最近action过大 ({recent_tokens} tokens)，进行分段压缩")
+            safe_print(f"🔄 最近action过大 ({recent_tokens} tokens)，进行分段压缩")
             compressed_recent = self._compress_large_action(recent_action, max_allowed_tokens - 20000)
             
             # 历史部分总结
@@ -111,7 +112,7 @@ class ContextCompressor:
                 return [summary_action, recent_action]
             else:
                 # 总结也太大了，进一步压缩总结
-                print(f"⚠️ 总结后仍超限 ({total_tokens} tokens)，使用极简总结")
+                safe_print(f"⚠️ 总结后仍超限 ({total_tokens} tokens)，使用极简总结")
                 # 直接返回一个超简单的总结 + 最近action
                 simple_summary = self._create_simple_summary(historical_actions)
                 return [simple_summary, recent_action]
@@ -194,7 +195,7 @@ class ContextCompressor:
             }
         
         except Exception as e:
-            print(f"⚠️ 总结失败: {e}")
+            safe_print(f"⚠️ 总结失败: {e}")
             # 失败时使用简单统计
             return self._create_simple_summary(actions)
     
@@ -240,7 +241,7 @@ class ContextCompressor:
         output_tokens = self.count_tokens(output)
         
         if output_tokens > max_tokens:
-            print(f"   压缩{tool_name}的output: {output_tokens} tokens → 目标 {max_tokens} tokens")
+            safe_print(f"   压缩{tool_name}的output: {output_tokens} tokens → 目标 {max_tokens} tokens")
             
             # 策略：首尾保留法（使用tiktoken精确截取）
             if self.encoding:
@@ -270,7 +271,7 @@ class ContextCompressor:
             
             # 验证压缩效果
             compressed_tokens = self.count_tokens(compressed_output)
-            print(f"   压缩结果: {compressed_tokens} tokens (压缩比: {compressed_tokens/output_tokens*100:.1f}%)")
+            safe_print(f"   压缩结果: {compressed_tokens} tokens (压缩比: {compressed_tokens/output_tokens*100:.1f}%)")
             
             return {
                 "tool_name": tool_name,
@@ -290,9 +291,9 @@ class ContextCompressor:
 
 if __name__ == "__main__":
     # 测试时不实际运行LLM，只测试逻辑
-    print("✅ ContextCompressor模块加载成功")
-    print("功能：")
-    print("  1. 总结历史actions为一段话")
-    print("  2. 保留最近1条action")
-    print("  3. 如果最近1条超大，使用首尾保留法压缩")
-    print("\n策略：历史总结 + 最新完整 = 最佳平衡")
+    safe_print("✅ ContextCompressor模块加载成功")
+    safe_print("功能：")
+    safe_print("  1. 总结历史actions为一段话")
+    safe_print("  2. 保留最近1条action")
+    safe_print("  3. 如果最近1条超大，使用首尾保留法压缩")
+    safe_print("\n策略：历史总结 + 最新完整 = 最佳平衡")

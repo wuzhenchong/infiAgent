@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 简化的LLM客户端 - 使用LiteLLM统一接口
@@ -86,11 +87,11 @@ class SimpleLLMClient:
         litellm.set_verbose = False  # 关闭详细日志
         litellm.drop_params = True  # 自动丢弃不支持的参数（如Anthropic不支持parallel_tool_calls）
         
-        print(f"✅ LLM客户端初始化成功（LiteLLM）")
-        print(f"   Base URL: {self.base_url}")
-        print(f"   可用模型: {len(self.models)} 个")
-        print(f"   默认Temperature: {self.temperature}")
-        print(f"   默认Max Tokens: {self.max_tokens}")
+        safe_print(f"✅ LLM客户端初始化成功（LiteLLM）")
+        safe_print(f"   Base URL: {self.base_url}")
+        safe_print(f"   可用模型: {len(self.models)} 个")
+        safe_print(f"   默认Temperature: {self.temperature}")
+        safe_print(f"   默认Max Tokens: {self.max_tokens}")
     
     def chat(
         self,
@@ -154,9 +155,9 @@ class SimpleLLMClient:
             
             # 使用LiteLLM调用
             # 添加调试信息
-            print(f"   📝 System Prompt长度: {len(system_prompt)} 字符")
-            print(f"   🔧 工具数量: {len(tools_definition)}")
-            print(f"   📨 消息数量: {len(messages)}")
+            safe_print(f"   📝 System Prompt长度: {len(system_prompt)} 字符")
+            safe_print(f"   🔧 工具数量: {len(tools_definition)}")
+            safe_print(f"   📨 消息数量: {len(messages)}")
             
             response = completion(**kwargs)  # 使用导入的函数
             
@@ -260,7 +261,7 @@ if __name__ == "__main__":
     # 测试LLM客户端
     try:
         client = SimpleLLMClient()
-        print(f"✅ 可用模型: {client.models}")
+        safe_print(f"✅ 可用模型: {client.models}")
         
         # 测试简单调用
         history = [ChatMessage(role="user", content="请输出下一个动作")]
@@ -272,11 +273,11 @@ if __name__ == "__main__":
             tool_choice="required"
         )
         
-        print(f"✅ 响应状态: {response.status}")
-        print(f"✅ 工具调用数量: {len(response.tool_calls)}")
+        safe_print(f"✅ 响应状态: {response.status}")
+        safe_print(f"✅ 工具调用数量: {len(response.tool_calls)}")
         if response.tool_calls:
-            print(f"✅ 第一个工具: {response.tool_calls[0].name}")
+            safe_print(f"✅ 第一个工具: {response.tool_calls[0].name}")
     except Exception as e:
-        print(f"❌ 测试失败: {e}")
+        safe_print(f"❌ 测试失败: {e}")
         import traceback
         traceback.print_exc()

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 层级管理器 - 管理Agent调用层级和共享上下文
@@ -78,7 +79,7 @@ class HierarchyManager:
                 data = json.load(f)
                 return data.get("stack", [])
         except Exception as e:
-            print(f"⚠️ 加载栈文件失败: {e}")
+            safe_print(f"⚠️ 加载栈文件失败: {e}")
             return []
     
     def _save_stack(self, stack: List[Dict]):
@@ -90,7 +91,7 @@ class HierarchyManager:
                     "last_updated": datetime.now().isoformat()
                 }, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"⚠️ 保存栈文件失败: {e}")
+            safe_print(f"⚠️ 保存栈文件失败: {e}")
     
     def _load_context(self) -> Dict:
         """加载共享上下文"""
@@ -98,7 +99,7 @@ class HierarchyManager:
             with open(self.context_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"⚠️ 加载共享上下文失败: {e}")
+            safe_print(f"⚠️ 加载共享上下文失败: {e}")
             return {
                 "task_id": self.task_id,
                 "current": {
@@ -117,7 +118,7 @@ class HierarchyManager:
             with open(self.context_file, 'w', encoding='utf-8') as f:
                 json.dump(context, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"⚠️ 保存共享上下文失败: {e}")
+            safe_print(f"⚠️ 保存共享上下文失败: {e}")
     
     def start_new_instruction(self, instruction: str) -> str:
         """
@@ -137,7 +138,7 @@ class HierarchyManager:
             existing_instructions = context["current"].get("instructions", [])
             for existing in existing_instructions:
                 if existing.get("instruction") == instruction:
-                    print(f"ℹ️ 指令已存在，跳过添加: {instruction[:50]}...")
+                    safe_print(f"ℹ️ 指令已存在，跳过添加: {instruction[:50]}...")
                     return existing.get("instruction_id", "")
             
             # 生成指令ID
@@ -156,7 +157,7 @@ class HierarchyManager:
             context["current"]["instructions"].append(instruction_entry)
             self._save_context(context)
             
-            print(f"📝 新指令已添加: {instruction_id} -> {instruction[:50]}...")
+            safe_print(f"📝 新指令已添加: {instruction_id} -> {instruction[:50]}...")
             
             return instruction_id
     
@@ -239,7 +240,7 @@ class HierarchyManager:
             
             self._save_context(context)
             
-            print(f"📚 Agent入栈: {agent_name} (ID: {agent_id}, Level: {level})")
+            safe_print(f"📚 Agent入栈: {agent_name} (ID: {agent_id}, Level: {level})")
             
             return agent_id
     
@@ -279,7 +280,7 @@ class HierarchyManager:
             # 检查是否所有Agent都完成，如果是则移动current到history
             self._check_and_complete_if_all_done()
             
-            print(f"📚 Agent出栈: {agent_id}")
+            safe_print(f"📚 Agent出栈: {agent_id}")
     
     def update_thinking(self, agent_id: str, thinking: str):
         """
@@ -328,7 +329,7 @@ class HierarchyManager:
         )
         
         if all_completed:
-            print("🎉 所有Agent已完成，移动current到history")
+            safe_print("🎉 所有Agent已完成，移动current到history")
             
             # 移动到history
             history_entry = {
@@ -354,7 +355,7 @@ class HierarchyManager:
             self._save_stack([])
             
             self._save_context(context)
-            print("✅ 任务已归档到history")
+            safe_print("✅ 任务已归档到history")
     
     def get_current_agent_id(self) -> Optional[str]:
         """获取当前栈顶的Agent ID"""
@@ -386,19 +387,19 @@ def get_hierarchy_manager(task_id: str) -> HierarchyManager:
 if __name__ == "__main__":
     # 测试层级管理器
     manager = HierarchyManager("test_task")
-    print("✅ 层级管理器初始化成功")
+    safe_print("✅ 层级管理器初始化成功")
     
     # 测试指令添加
     instr_id = manager.start_new_instruction("测试任务")
-    print(f"✅ 添加指令: {instr_id}")
+    safe_print(f"✅ 添加指令: {instr_id}")
     
     # 测试Agent入栈
     agent1_id = manager.push_agent("test_agent", "测试输入")
-    print(f"✅ Agent入栈: {agent1_id}")
+    safe_print(f"✅ Agent入栈: {agent1_id}")
     
     # 测试thinking更新
     manager.update_thinking(agent1_id, "这是一个测试thinking")
-    print("✅ Thinking更新成功")
+    safe_print("✅ Thinking更新成功")
     
     # 测试动作添加
     manager.add_action(agent1_id, {
@@ -406,5 +407,5 @@ if __name__ == "__main__":
         "arguments": {"path": "test.txt"},
         "result": {"status": "success"}
     })
-    print("✅ 动作记录成功")
+    safe_print("✅ 动作记录成功")
 

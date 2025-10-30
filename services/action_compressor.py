@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 历史动作压缩服务
@@ -82,7 +83,7 @@ class ActionCompressor:
         if total_tokens <= max_context_window - 20000:
             return action_history
         
-        print(f"🔄 历史动作需要压缩: {total_tokens} tokens > {max_context_window - 20000}")
+        safe_print(f"🔄 历史动作需要压缩: {total_tokens} tokens > {max_context_window - 20000}")
         
         # 压缩策略：
         # 1. 历史 → 总结为5k tokens
@@ -104,7 +105,7 @@ class ActionCompressor:
         # 验证压缩效果
         result_xml = self._actions_to_xml(result)
         result_tokens = self.count_tokens(result_xml)
-        print(f"✅ 压缩完成: {total_tokens} tokens → {result_tokens} tokens (压缩比: {result_tokens/total_tokens*100:.1f}%)")
+        safe_print(f"✅ 压缩完成: {total_tokens} tokens → {result_tokens} tokens (压缩比: {result_tokens/total_tokens*100:.1f}%)")
         
         return result
     
@@ -180,7 +181,7 @@ class ActionCompressor:
             }
         
         except Exception as e:
-            print(f"⚠️ 总结失败: {e}")
+            safe_print(f"⚠️ 总结失败: {e}")
             return {
                 "tool_name": "_historical_summary",
                 "arguments": {},
@@ -208,7 +209,7 @@ class ActionCompressor:
                 v_tokens = self.count_tokens(v_str)
                 
                 if v_tokens > max_field_tokens:
-                    print(f"   🤖 LLM压缩arguments.{k}: {v_tokens} tokens → {max_field_tokens} tokens")
+                    safe_print(f"   🤖 LLM压缩arguments.{k}: {v_tokens} tokens → {max_field_tokens} tokens")
                     compressed_v = self._llm_compress_field(v_str, max_field_tokens, action.get("tool_name", "unknown"))
                     compressed_args[k] = compressed_v
                 else:
@@ -221,7 +222,7 @@ class ActionCompressor:
             output_tokens = self.count_tokens(output)
             
             if output_tokens > max_field_tokens:
-                print(f"   🤖 LLM压缩result.output: {output_tokens} tokens → {max_field_tokens} tokens")
+                safe_print(f"   🤖 LLM压缩result.output: {output_tokens} tokens → {max_field_tokens} tokens")
                 compressed_output = self._llm_compress_field(output, max_field_tokens, action.get("tool_name", "unknown"))
                 compressed_action["result"]["output"] = compressed_output
                 compressed_action["result"]["_compressed"] = True
@@ -285,12 +286,12 @@ class ActionCompressor:
             
             # 验证压缩效果
             actual_tokens = self.count_tokens(compressed)
-            print(f"      压缩效果: {actual_tokens}/{target_tokens} tokens ({actual_tokens/target_tokens*100:.1f}%)")
+            safe_print(f"      压缩效果: {actual_tokens}/{target_tokens} tokens ({actual_tokens/target_tokens*100:.1f}%)")
             
             return compressed
             
         except Exception as e:
-            print(f"⚠️ LLM压缩失败，使用fallback: {e}")
+            safe_print(f"⚠️ LLM压缩失败，使用fallback: {e}")
             # fallback：首尾保留
             return self._fallback_compress(text, target_tokens)
     
@@ -317,9 +318,9 @@ class ActionCompressor:
 
 
 if __name__ == "__main__":
-    print("✅ ActionCompressor模块加载成功")
-    print("\n压缩策略：")
-    print("1. 历史actions → LLM总结为5k tokens")
-    print("2. 最新action → 保留结构，LLM智能压缩大字段到50% max_window")
-    print("3. 备用方案 → 首尾保留法（当LLM失败时）")
+    safe_print("✅ ActionCompressor模块加载成功")
+    safe_print("\n压缩策略：")
+    safe_print("1. 历史actions → LLM总结为5k tokens")
+    safe_print("2. 最新action → 保留结构，LLM智能压缩大字段到50% max_window")
+    safe_print("3. 备用方案 → 首尾保留法（当LLM失败时）")
 

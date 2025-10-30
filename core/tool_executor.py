@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from utils.windows_compat import safe_print
 # -*- coding: utf-8 -*-
 """
 工具执行器 - 通过HTTP调用toolServer
@@ -42,7 +43,7 @@ class ToolExecutor:
                 # 移除末尾的斜杠
                 return url.rstrip('/')
         except Exception as e:
-            print(f"⚠️ 加载工具服务器配置失败: {e}，使用默认值")
+            safe_print(f"⚠️ 加载工具服务器配置失败: {e}，使用默认值")
             return "http://127.0.0.1:8001"
     
     def _ensure_task_exists(self, task_id: str):
@@ -65,13 +66,13 @@ class ToolExecutor:
             create_response = requests.post(create_url, params=params, timeout=10)
             
             if create_response.status_code == 200:
-                print(f"✅ 任务 '{task_id}' 已在toolServer中创建")
+                safe_print(f"✅ 任务 '{task_id}' 已在toolServer中创建")
                 self.task_cache[task_id] = True
             else:
-                print(f"⚠️ 创建任务失败: {create_response.text}")
+                safe_print(f"⚠️ 创建任务失败: {create_response.text}")
         
         except Exception as e:
-            print(f"⚠️ 检查/创建任务时出错: {e}")
+            safe_print(f"⚠️ 检查/创建任务时出错: {e}")
     
     def execute(self, tool_name: str, arguments: Dict[str, Any], task_id: str) -> Dict:
         """
@@ -145,7 +146,7 @@ class ToolExecutor:
                 'Accept': 'application/json; charset=utf-8'
             }
             
-            print(f"   🔗 调用toolServer: {tool_name}")
+            safe_print(f"   🔗 调用toolServer: {tool_name}")
             
             # 发送请求
             response = requests.post(
@@ -212,8 +213,8 @@ class ToolExecutor:
         except Exception as e:
             import traceback
             error_detail = traceback.format_exc()
-            print(f"❌ 子Agent执行失败: {e}")
-            print(f"详细错误:\n{error_detail}")
+            safe_print(f"❌ 子Agent执行失败: {e}")
+            safe_print(f"详细错误:\n{error_detail}")
             return {
                 "status": "error",
                 "output": "",
@@ -230,8 +231,8 @@ if __name__ == "__main__":
     hierarchy_manager = get_hierarchy_manager("test_task")
     
     executor = ToolExecutor(config_loader, hierarchy_manager)
-    print(f"✅ 工具执行器初始化成功")
-    print(f"   ToolServer URL: {executor.tools_server_url}")
+    safe_print(f"✅ 工具执行器初始化成功")
+    safe_print(f"   ToolServer URL: {executor.tools_server_url}")
     
     # 测试final_output
     result = executor.execute("final_output", {
@@ -240,4 +241,4 @@ if __name__ == "__main__":
         "output": "测试完成"
     }, "test_task")
     
-    print(f"✅ final_output测试: {result}")
+    safe_print(f"✅ final_output测试: {result}")
