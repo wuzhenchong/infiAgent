@@ -344,11 +344,23 @@ class PipInstallTool(BaseTool):
             # 安装包
             results = []
             for package in packages:
+                # 设置环境变量，避免 Bad file descriptor
+                import os
+                env = os.environ.copy()
+                env.setdefault("PYTHONIOENCODING", "utf-8")
+                env.setdefault("PYTHONUTF8", "1")
+                
+                # Windows 下不使用 close_fds
+                close_fds = (sys.platform != "win32")
+                
                 result = subprocess.run(
                     [str(pip_exec), "install", package],
+                    stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,
-                    timeout=timeout
+                    timeout=timeout,
+                    env=env,
+                    close_fds=close_fds
                 )
                 
                 if result.returncode == 0:
