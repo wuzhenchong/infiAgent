@@ -85,6 +85,8 @@ Or install only Chromium:
 python -m playwright install chromium
 ```
 
+Please set the corresponding Python bin directory as an environment variable. Alternatively, you can choose to launch the CLI under conda or UV.
+
 **3. Configure API Keys**
 
 ```bash
