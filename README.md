@@ -128,6 +128,9 @@ mla-agent \
 ### Using CLI Mode run your first task
 
 ```bash
+#!!important!! cd your workspace fisrst!
+cd your workspace
+
 mla-agent --cli
 ```
 
