@@ -69,6 +69,9 @@ MLA handles the entire research workflow - from literature search and experiment
 **1. Install the package**
 
 ```bash
+#ensure your python or python3 version >3.10
+python -m venv venv
+source venv/bin/activate
 cd /path/to/MLA_V3
 pip install -e .
 ```
@@ -85,13 +88,7 @@ Or install only Chromium:
 python -m playwright install chromium
 ```
 
-Please set the corresponding Python bin directory as an environment variable. Alternatively, you can choose to launch the CLI under conda or UV.
 
-```bash
-find your python bin path
-add it into environment variable
-source file
-```
 
 **3. Configure API Keys**
 
