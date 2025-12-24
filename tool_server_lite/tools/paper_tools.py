@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Paper分析工具 - 论文内容分析
+舍弃了，标准化为 agent 即可
 """
 
 from pathlib import Path

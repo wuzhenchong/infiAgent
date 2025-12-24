@@ -553,7 +553,7 @@ if __name__ == "__main__":
     hierarchy_manager.start_new_instruction("测试任务")
     
     # 获取writing_agent配置
-    agent_config = config_loader.get_tool_config("writing_agent")
+    agent_config = config_loader.get_tool_config("alpha_agent")
     
     safe_print(f"✅ Agent配置: {agent_config.get('name')}")
     safe_print(f"   Tools: {len(agent_config.get('available_tools', []))}")

@@ -578,9 +578,8 @@ class InteractiveCLI:
         print(f"💡 {self.t('hint_resume')}")
         print(f"{'='*80}\n")
         
-        # 获取 mla-agent 命令路径
-        import shutil
-        mla_cmd = shutil.which('mla-agent') or 'mla-agent'
+        # 使用当前 Python 解释器调用 start.py（避免 venv 路径问题）
+        start_py = Path(__file__).parent.parent / "start.py"
         
         # Windows 需要特殊的进程创建标志以支持信号处理
         popen_kwargs = {
@@ -596,9 +595,10 @@ class InteractiveCLI:
             # Windows: 创建新的进程组，允许发送 Ctrl+Break
             popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
         
-        # 构建命令参数
+        # 构建命令参数（使用 Python 解释器直接运行 start.py）
         cmd_args = [
-            mla_cmd,
+            sys.executable,
+            str(start_py),
             '--task_id', self.task_id,
             '--agent_name', agent_name,
             '--user_input', user_input,

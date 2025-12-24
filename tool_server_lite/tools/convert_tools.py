@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 文档转换工具 - 调用远程 Pandoc API
+舍弃，等待市面上出现免费的文档类型互转的高质量 api 吧。（tex 转万物或者 md 转万物）
 """
 
 from pathlib import Path
