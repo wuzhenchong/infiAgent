@@ -33,7 +33,7 @@ The default configuration in this repository is a **research-oriented semi-speci
 
 Watch MLA generate complete academic papers end-to-end:
 
-**Demo 1:w**
+**Demo 1:**
 
 <p align="center">
   <img src="assets/paper_generation_demo_1.gif" alt="Paper Generation Demo 1" width="800">
