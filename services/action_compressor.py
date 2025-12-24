@@ -47,6 +47,8 @@ class ActionCompressor:
         self,
         action_history: List[Dict],
         max_context_window: int,
+        thinking: str = "",
+        task_input: str = "",
         save_callback=None  # 添加保存回调，确保压缩后立即保存
     ) -> List[Dict]:
         """
@@ -55,10 +57,13 @@ class ActionCompressor:
         策略：
         1. 保留最新1条action（完整或压缩大字段）
         2. 之前的所有action总结为一个summary_action
+        3. 基于 thinking 和 task_input 判断哪些信息有效、哪些无关
         
         Args:
             action_history: 动作历史
             max_context_window: 最大窗口大小
+            thinking: 当前的 thinking 内容（包含 todolist 和计划）
+            task_input: 任务需求描述
             
         Returns:
             压缩后的action_history
@@ -86,18 +91,22 @@ class ActionCompressor:
         safe_print(f"🔄 历史动作需要压缩: {total_tokens} tokens > {max_context_window - 20000}")
         
         # 压缩策略：
-        # 1. 历史 → 总结为5k tokens
+        # 1. 历史 → 基于 thinking 和 task_input 智能总结为5k tokens
         # 2. 最新 → 压缩为max_window的50%
         
         summary_action = self._summarize_historical_xml(
             self._actions_to_xml(historical_actions),
-            target_tokens=5000  # 历史总结固定5k tokens
+            target_tokens=5000,  # 历史总结固定5k tokens
+            thinking=thinking,
+            task_input=task_input
         )
         
         # 压缩最新action的大字段（50% of max_window）
         compressed_recent = self._compress_action_fields(
             recent_action,
-            int(max_context_window * 0.5)  # 80000 * 0.5 = 40000 tokens
+            int(max_context_window * 0.5),  # 80000 * 0.5 = 40000 tokens
+            thinking=thinking,
+            task_input=task_input
         )
         
         result = [summary_action, compressed_recent]
@@ -132,12 +141,22 @@ class ActionCompressor:
         
         return "\n\n".join(xml_parts)
     
-    def _summarize_historical_xml(self, xml_text: str, target_tokens: int = 5000) -> Dict:
+    def _summarize_historical_xml(
+        self, 
+        xml_text: str, 
+        target_tokens: int = 5000,
+        thinking: str = "",
+        task_input: str = ""
+    ) -> Dict:
         """
         总结历史XML内容为一个summary action
+        基于 thinking 和 task_input 智能判断哪些信息有效
         
         Args:
             xml_text: 历史actions的XML文本
+            target_tokens: 目标token数
+            thinking: 当前的 thinking 内容（包含 todolist 和计划）
+            task_input: 任务需求描述
             
         Returns:
             一个summary action
@@ -145,25 +164,48 @@ class ActionCompressor:
         try:
             from services.llm_client import ChatMessage
             
-            prompt = f"""请总结以下历史动作的关键信息（严格不超过{target_tokens} tokens）：
+            # 构建智能压缩提示词
+            context_info = ""
+            if task_input:
+                context_info += f"\n<任务需求>\n{task_input}\n</任务需求>\n"
+            if thinking:
+                context_info += f"\n<当前进度与计划>\n{thinking}\n</当前进度与计划>\n"
+            
+            prompt = f"""你是智能历史信息压缩助手。请基于任务需求和当前进度，智能压缩以下历史动作。
 
+{context_info}
+
+<历史动作>
 {xml_text}
+</历史动作>
 
-要求：
-1. 说明执行了哪些工具
-2. 关键的输出和结果
-3. 重要的文件路径
-4. 目标长度：{target_tokens} tokens
-5. 极度简洁但保留核心信息
+压缩要求：
+1. **目标长度**: 严格控制在 {target_tokens} tokens 以内
+2. **智能筛选**: 
+   - 分析 thinking 中的 todolist/计划，判断哪些动作是为了完成未完成的任务目标
+   - 保留已完成任务相关的**关键结果**（如生成的文件路径、重要输出）
+   - 丢弃无关或失败的尝试信息
+3. **优先保留**:
+   - 成功完成的关键步骤（如创建的文件、执行的代码、获取的数据）
+   - 重要的文件路径和位置信息
+   - 对后续任务有参考价值的输出
+4. **可以丢弃**:
+   - 重复的尝试和错误信息
+   - 中间的调试过程
+   - 与当前任务目标无关的探索性操作
+5. **格式要求**:
+   - 按时间顺序总结
+   - 突出关键成果和产出
+   - 保持信息的连贯性
 
-请用中文总结："""
+请直接输出压缩后的总结（中文）："""
             
             history = [ChatMessage(role="user", content=prompt)]
             
             response = self.llm_client.chat(
                 history=history,
-                model=self.llm_client.models[0],
-                system_prompt=f"你是内容总结助手。目标：将内容压缩到{target_tokens} tokens以内。",
+                model=self.llm_client.compressor_models[0],
+                system_prompt=f"你是整体上下文构造专家。目标：将内容压缩到{target_tokens} tokens以内。",
                 tool_list=[],
                 tool_choice="auto"
             )
@@ -188,13 +230,21 @@ class ActionCompressor:
                 "result": {"status": "success", "output": "[历史动作已省略]", "_is_summary": True}
             }
     
-    def _compress_action_fields(self, action: Dict, max_field_tokens: int) -> Dict:
+    def _compress_action_fields(
+        self, 
+        action: Dict, 
+        max_field_tokens: int,
+        thinking: str = "",
+        task_input: str = ""
+    ) -> Dict:
         """
         压缩action中的大字段（arguments和result）
         
         Args:
             action: 原始action
             max_field_tokens: 单个字段的最大token数（通常是max_context_window/2）
+            thinking: 当前的 thinking 内容
+            task_input: 任务需求描述
             
         Returns:
             压缩后的action
@@ -210,7 +260,14 @@ class ActionCompressor:
                 
                 if v_tokens > max_field_tokens:
                     safe_print(f"   🤖 LLM压缩arguments.{k}: {v_tokens} tokens → {max_field_tokens} tokens")
-                    compressed_v = self._llm_compress_field(v_str, max_field_tokens, action.get("tool_name", "unknown"))
+                    compressed_v = self._llm_compress_field(
+                        v_str, 
+                        max_field_tokens, 
+                        action.get("tool_name", "unknown"),
+                        thinking=thinking,
+                        task_input=task_input,
+                        field_context=f"工具 '{action.get('tool_name')}' 的参数 '{k}'"
+                    )
                     compressed_args[k] = compressed_v
                 else:
                     compressed_args[k] = v
@@ -223,14 +280,33 @@ class ActionCompressor:
             
             if output_tokens > max_field_tokens:
                 safe_print(f"   🤖 LLM压缩result.output: {output_tokens} tokens → {max_field_tokens} tokens")
-                compressed_output = self._llm_compress_field(output, max_field_tokens, action.get("tool_name", "unknown"))
+                # 构建字段上下文（包含工具参数信息）
+                args_summary = ", ".join([f"{k}={v}" for k, v in compressed_action.get("arguments", {}).items()])
+                field_context = f"工具 '{action.get('tool_name')}' 的执行结果 (参数: {args_summary})"
+                
+                compressed_output = self._llm_compress_field(
+                    output, 
+                    max_field_tokens, 
+                    action.get("tool_name", "unknown"),
+                    thinking=thinking,
+                    task_input=task_input,
+                    field_context=field_context
+                )
                 compressed_action["result"]["output"] = compressed_output
                 compressed_action["result"]["_compressed"] = True
                 compressed_action["result"]["_original_tokens"] = output_tokens
         
         return compressed_action
     
-    def _llm_compress_field(self, text: str, target_tokens: int, tool_name: str) -> str:
+    def _llm_compress_field(
+        self, 
+        text: str, 
+        target_tokens: int, 
+        tool_name: str,
+        thinking: str = "",
+        task_input: str = "",
+        field_context: str = ""
+    ) -> str:
         """
         使用LLM智能压缩单个字段
         
@@ -238,6 +314,9 @@ class ActionCompressor:
             text: 原始文本
             target_tokens: 目标token数
             tool_name: 工具名称（用于优化提示词）
+            thinking: 当前的 thinking 内容
+            task_input: 任务需求描述
+            field_context: 字段上下文（如 "工具 'file_read' 的参数 'path'"）
             
         Returns:
             压缩后的文本
@@ -259,16 +338,41 @@ class ActionCompressor:
                 content_type = "内容"
                 focus = "保留最重要的核心信息"
             
-            prompt = f"""请智能压缩以下{content_type}到约{target_tokens} tokens：
+            # 构建上下文信息
+            context_info = ""
+            if task_input:
+                context_info += f"\n<任务需求>\n{task_input}\n</任务需求>\n"
+            if thinking:
+                context_info += f"\n<当前进度与计划>\n{thinking}\n</当前进度与计划>\n"
+            if field_context:
+                context_info += f"\n<字段来源>\n这是最新动作中 {field_context} 的内容\n</字段来源>\n"
+            
+            prompt = f"""你是智能内容压缩助手。请基于任务需求和当前进度，压缩以下{content_type}。
 
+{context_info}
+
+<待压缩的{content_type}>
 {text}
+</待压缩的{content_type}>
 
 压缩要求：
-1. 目标长度：{target_tokens} tokens
-2. {focus}
-3. 保持信息的连贯性和可读性
-4. 使用总结和提炼，而非简单截断
-5. 如果有结构化内容（表格、列表），保留关键部分
+1. **目标长度**: 严格控制在 {target_tokens} tokens 以内
+2. **智能筛选**: 
+   - 根据 thinking 中的任务进度，判断哪些信息对未完成的任务有价值
+   - {focus}
+   - 丢弃与当前任务目标无关的内容
+3. **优先保留**:
+   - 与任务目标直接相关的关键信息
+   - 重要的文件路径、数据、结果
+   - 后续步骤需要引用的内容
+4. **可以丢弃**:
+   - 冗余的细节和重复信息
+   - 与任务无关的探索性内容
+   - 中间过程的调试信息
+5. **格式要求**:
+   - 保持信息的连贯性和可读性
+   - 使用总结和提炼，而非简单截断
+   - 如果有结构化内容（表格、列表），保留关键部分
 
 请直接输出压缩后的内容（不要额外说明）："""
             
@@ -276,7 +380,7 @@ class ActionCompressor:
             
             response = self.llm_client.chat(
                 history=history,
-                model=self.llm_client.models[0],
+                model=self.llm_client.compressor_models[0],
                 system_prompt=f"你是智能内容压缩助手。目标：将{content_type}压缩到{target_tokens} tokens，同时保留核心信息。",
                 tool_list=[],
                 tool_choice="auto"

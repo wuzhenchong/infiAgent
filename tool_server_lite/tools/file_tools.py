@@ -90,78 +90,45 @@ class FileReadTool(BaseTool):
     
     def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        读取文件内容
+        读取文件内容（支持单个或多个文件）
         
         Parameters:
-            path (str): 相对路径
+            path (list): 文件路径数组，单个文件传 ['file.txt']
+            file_path (str or list): 同 path（兼容性参数）
             start_line (int, optional): 起始行号（从1开始）
             end_line (int, optional): 结束行号
             encoding (str, optional): 文件编码
             show_line_numbers (bool, optional): 是否显示行号，默认 True
         """
         try:
-            path = parameters.get("path")
-            start_line = parameters.get("start_line")
-            end_line = parameters.get("end_line")
-            encoding = parameters.get("encoding")
-            show_line_numbers = parameters.get("show_line_numbers", True)
+            # 兼容 path 和 file_path 两种参数名
+            path = parameters.get("path") or parameters.get("file_path")
             
-            abs_path = get_abs_path(task_id, path)
-            
-            # 检查文件是否存在
-            if not abs_path.exists():
+            if not path:
                 return {
                     "status": "error",
                     "output": "",
-                    "error": f"File not found: {path}"
+                    "error": "Missing required parameter: 'path' or 'file_path'"
                 }
             
-            # 检查是否为二进制文件
-            if is_binary_file(abs_path):
+            # 统一转换为列表
+            if isinstance(path, str):
+                # 兼容旧版本：如果是字符串，转换为单元素列表
+                path = [path]
+            elif not isinstance(path, list):
                 return {
                     "status": "error",
                     "output": "",
-                    "error": f"Cannot read binary file: {path}. Use parse_document for PDF/DOC files."
+                    "error": f"Invalid path type: {type(path).__name__}, expected list"
                 }
             
-            # 自动检测编码
-            if not encoding:
-                encoding = detect_encoding(abs_path)
-            
-            # 读取文件
-            try:
-                with open(abs_path, 'r', encoding=encoding) as f:
-                    lines = f.readlines()
-            except UnicodeDecodeError:
-                # 如果指定编码失败，尝试 utf-8
-                with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    lines = f.readlines()
-            
-            # 处理行范围
-            start_idx = (start_line - 1) if start_line else 0
-            end_idx = end_line if end_line else len(lines)
-            selected_lines = lines[start_idx:end_idx]
-            
-            # 格式化输出
-            if show_line_numbers:
-                # 带行号格式
-                import json
-                output_lines = []
-                for i, line in enumerate(selected_lines, start=start_idx + 1):
-                    output_lines.append({
-                        "line": i,
-                        "content": line.rstrip('\n\r')
-                    })
-                content = json.dumps(output_lines, ensure_ascii=False, indent=2)
+            # 根据列表长度决定使用哪种模式
+            if len(path) == 1:
+                # 单文件模式
+                return self._read_single_file(task_id, path[0], parameters)
             else:
-                # 纯文本格式
-                content = ''.join(selected_lines)
-            
-            return {
-                "status": "success",
-                "output": content,
-                "error": ""
-            }
+                # 多文件模式
+                return self._read_multiple_files(task_id, path, parameters)
             
         except Exception as e:
             return {
@@ -169,6 +136,164 @@ class FileReadTool(BaseTool):
                 "output": "",
                 "error": str(e)
             }
+    
+    def _read_single_file(self, task_id: str, path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """读取单个文件"""
+        start_line = parameters.get("start_line")
+        end_line = parameters.get("end_line")
+        encoding = parameters.get("encoding")
+        show_line_numbers = parameters.get("show_line_numbers", True)
+        
+        abs_path = get_abs_path(task_id, path)
+        
+        # 检查文件是否存在
+        if not abs_path.exists():
+            return {
+                "status": "error",
+                "output": "",
+                "error": f"File not found: {path}"
+            }
+        
+        # 检查是否为二进制文件
+        if is_binary_file(abs_path):
+            return {
+                "status": "error",
+                "output": "",
+                "error": f"Cannot read binary file: {path}. Use other tools to analyze the file."
+            }
+        
+        # 自动检测编码
+        if not encoding:
+            encoding = detect_encoding(abs_path)
+        
+        # 读取文件
+        try:
+            with open(abs_path, 'r', encoding=encoding) as f:
+                lines = f.readlines()
+        except UnicodeDecodeError:
+            # 如果指定编码失败，尝试 utf-8
+            with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+        
+        # 处理行范围
+        start_idx = (start_line - 1) if start_line else 0
+        end_idx = end_line if end_line else len(lines)
+        selected_lines = lines[start_idx:end_idx]
+        
+        # 格式化输出
+        if show_line_numbers:
+            # 带行号格式
+            import json
+            output_lines = []
+            for i, line in enumerate(selected_lines, start=start_idx + 1):
+                output_lines.append({
+                    "line": i,
+                    "content": line.rstrip('\n\r')
+                })
+            content = json.dumps(output_lines, ensure_ascii=False, indent=2)
+        else:
+            # 纯文本格式
+            content = ''.join(selected_lines)
+        
+        return {
+            "status": "success",
+            "output": content,
+            "error": ""
+        }
+    
+    def _read_multiple_files(self, task_id: str, paths: list, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """读取多个文件"""
+        import json
+        
+        start_line = parameters.get("start_line")
+        end_line = parameters.get("end_line")
+        encoding = parameters.get("encoding")
+        show_line_numbers = parameters.get("show_line_numbers", True)
+        
+        results = {}
+        errors = []
+        success_count = 0
+        
+        for path in paths:
+            try:
+                abs_path = get_abs_path(task_id, path)
+                
+                # 检查文件是否存在
+                if not abs_path.exists():
+                    errors.append(f"File not found: {path}")
+                    results[path] = {
+                        "status": "error",
+                        "error": f"File not found: {path}"
+                    }
+                    continue
+                
+                # 检查是否为二进制文件
+                if is_binary_file(abs_path):
+                    errors.append(f"Cannot read binary file: {path}")
+                    results[path] = {
+                        "status": "error",
+                        "error": f"Binary file, use other tools"
+                    }
+                    continue
+                
+                # 自动检测编码
+                file_encoding = encoding or detect_encoding(abs_path)
+                
+                # 读取文件
+                try:
+                    with open(abs_path, 'r', encoding=file_encoding) as f:
+                        lines = f.readlines()
+                except UnicodeDecodeError:
+                    with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                
+                # 处理行范围
+                start_idx = (start_line - 1) if start_line else 0
+                end_idx = end_line if end_line else len(lines)
+                selected_lines = lines[start_idx:end_idx]
+                
+                # 格式化内容
+                if show_line_numbers:
+                    output_lines = []
+                    for i, line in enumerate(selected_lines, start=start_idx + 1):
+                        output_lines.append({
+                            "line": i,
+                            "content": line.rstrip('\n\r')
+                        })
+                    content = output_lines  # 保持为列表，稍后统一序列化
+                else:
+                    content = ''.join(selected_lines)
+                
+                results[path] = {
+                    "status": "success",
+                    "content": content,
+                    "total_lines": len(lines)
+                }
+                success_count += 1
+                
+            except Exception as e:
+                errors.append(f"{path}: {str(e)}")
+                results[path] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+        
+        # 构建输出
+        output_data = {
+            "total_files": len(paths),
+            "success_count": success_count,
+            "error_count": len(errors),
+            "files": results
+        }
+        
+        if errors:
+            output_data["errors"] = errors
+        
+        return {
+            "status": "success" if success_count > 0 else "error",
+            "output": json.dumps(output_data, ensure_ascii=False, indent=2),
+            "error": "\n".join(errors) if errors else ""
+        }
 
 
 class FileWriteTool(BaseTool):
@@ -368,40 +493,42 @@ class FileMoveTool(BaseTool):
             copy (bool): 是否复制（保留原文件），默认 False（移动）
         """
         try:
-            source = parameters.get("source")
+            sources = parameters.get("source")
             destination = parameters.get("destination")
             copy_mode = parameters.get("copy", False)
-            
-            src_path = get_abs_path(task_id, source)
             dst_path = get_abs_path(task_id, destination)
+            for source in sources:
             
-            if not src_path.exists():
-                return {
-                    "status": "error",
-                    "output": "",
-                    "error": f"Source not found: {source}"
-                }
+                src_path = get_abs_path(task_id, source)
+            
+            
+                if not src_path.exists():
+                    return {
+                        "status": "error",
+                        "output": "",
+                        "error": f"Source not found: {source}"
+                    }
             
             # 确保目标目录存在
-            dst_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            if copy_mode:
-                # 复制模式
-                if src_path.is_dir():
-                    shutil.copytree(str(src_path), str(dst_path), dirs_exist_ok=True)
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                if copy_mode:
+                    # 复制模式
+                    if src_path.is_dir():
+                        shutil.copytree(str(src_path), str(dst_path), dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(str(src_path), str(dst_path))
+                    action = "Copied"
                 else:
-                    shutil.copy2(str(src_path), str(dst_path))
-                action = "Copied"
-            else:
-                # 移动模式
-                shutil.move(str(src_path), str(dst_path))
-                action = "Moved"
-            
+                    # 移动模式
+                    shutil.move(str(src_path), str(dst_path))
+                    action = "Moved"
+                
             return {
-                "status": "success",
-                "output": f"{action} {source} to {destination}",
-                "error": ""
-            }
+                    "status": "success",
+                    "output": f"全部移动成功",
+                    "error": ""
+                }
             
         except Exception as e:
             return {

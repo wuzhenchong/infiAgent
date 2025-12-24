@@ -78,20 +78,15 @@ def main():
     # 子命令
     subparsers = parser.add_subparsers(dest='command', help='命令')
     
-    # confirm 子命令（HIL 确认）
-    confirm_parser = subparsers.add_parser('confirm', help='完成 HIL 任务')
-    confirm_parser.add_argument('hil_id', type=str, help='HIL 任务 ID')
-    confirm_parser.add_argument('--result', type=str, default='确认', help='用户操作结果')
-    
-    # cancel 子命令（HIL 取消）
-    cancel_parser = subparsers.add_parser('cancel', help='取消 HIL 任务')
-    cancel_parser.add_argument('hil_id', type=str, help='HIL 任务 ID')
-    cancel_parser.add_argument('--reason', type=str, default='用户取消', help='取消原因')
-    
+    # respond 子命令（HIL 响应）
+    respond_parser = subparsers.add_parser('respond', help='响应 HIL 任务')
+    respond_parser.add_argument('hil_id', type=str, help='HIL 任务 ID')
+    respond_parser.add_argument('response', type=str, help='用户响应内容（可以是任何文本）')
     # 主命令参数
     parser.add_argument('--task_id', type=str, help='任务ID（绝对路径，作为workspace）')
-    parser.add_argument('--agent_system', type=str, default='Test_agent', help='Agent系统名称')
-    parser.add_argument('--agent_name', type=str, default='writing_agent', help='启动的Agent名称')
+    parser.add_argument('--agent_system', type=str, default='Default', help='Agent系统名称')
+    #parser.add_argument('--agent_system', type=str, default='Test_agent', help='Agent系统名称')
+    parser.add_argument('--agent_name', type=str, default='alpha_agent', help='启动的Agent名称')
     parser.add_argument('--user_input', type=str, help='用户输入/任务描述')
     parser.add_argument('--jsonl', action='store_true', help='启用 JSONL 事件输出模式（用于 VS Code 插件集成）')
     parser.add_argument('--cli', action='store_true', help='启动交互式 CLI 模式')
@@ -100,6 +95,7 @@ def main():
     parser.add_argument('--config-set', nargs=2, metavar=('KEY', 'VALUE'), help='设置配置项（如 api_key "YOUR_KEY"）')
     parser.add_argument('--config-file', type=str, help='使用自定义配置文件路径')
     parser.add_argument('--force-new', action='store_true', help='强制清空所有状态，开始新任务')
+    parser.add_argument('--auto-mode', type=str, choices=['true', 'false'], help='工具执行模式：true=自动执行，false=需要确认')
     
     args = parser.parse_args()
     
@@ -119,8 +115,8 @@ def main():
             # print(f"[调试] 编码修复失败: {e}", file=sys.stderr)
             pass
     
-    # 处理 confirm 命令
-    if args.command == 'confirm':
+    # 处理 respond 命令
+    if args.command == 'respond':
         import requests
         import yaml
         
@@ -130,52 +126,21 @@ def main():
             tool_config = yaml.safe_load(f)
         server_url = tool_config.get('tools_server', 'http://127.0.0.1:8001').rstrip('/')
         
-        # 调用 HIL 完成 API
+        # 调用 HIL 响应 API
         try:
             response = requests.post(
-                f"{server_url}/api/hil/complete/{args.hil_id}",
-                json={"result": args.result},
+                f"{server_url}/api/hil/respond/{args.hil_id}",
+                json={"response": args.response},
                 timeout=5
             )
             result = response.json()
             
             if result.get('success'):
-                print(f"✅ HIL 任务已完成: {args.hil_id}")
-                print(f"   结果: {args.result}")
+                print(f"✅ HIL 任务已响应: {args.hil_id}")
+                print(f"   内容: {args.response}")
                 return 0
             else:
-                print(f"❌ 完成失败: {result.get('error', 'Unknown error')}")
-                return 1 
-        except Exception as e:
-            print(f"❌ 连接工具服务器失败: {e}")
-            return 1
-    
-    # 处理 cancel 命令
-    if args.command == 'cancel':
-        import requests
-        import yaml
-        
-        # 读取工具服务器地址
-        config_path = Path(__file__).parent / "config" / "run_env_config" / "tool_config.yaml"
-        with open(config_path, 'r', encoding='utf-8') as f:
-            tool_config = yaml.safe_load(f)
-        server_url = tool_config.get('tools_server', 'http://127.0.0.1:8001').rstrip('/')
-        
-        # 调用 HIL 取消 API
-        try:
-            response = requests.post(
-                f"{server_url}/api/hil/cancel/{args.hil_id}",
-                json={"reason": args.reason},
-                timeout=5
-            )
-            result = response.json()
-            
-            if result.get('success'):
-                print(f"⏭️  HIL 任务已取消: {args.hil_id}")
-                print(f"   原因: {args.reason}")
-                return 0
-            else:
-                print(f"❌ 取消失败: {result.get('error', 'Unknown error')}")
+                print(f"❌ 响应失败: {result.get('error', 'Unknown error')}")
                 return 1 
         except Exception as e:
             print(f"❌ 连接工具服务器失败: {e}")
@@ -184,7 +149,8 @@ def main():
     # 处理 CLI 模式
     if args.cli:
         from utils.cli_mode import start_cli_mode
-        start_cli_mode(args.agent_system)
+        # 不传入 agent_system，让用户在 CLI 中选择
+        start_cli_mode()
         return 0
     
     # 处理配置命令（优先）
@@ -320,6 +286,11 @@ def main():
             config_loader=config_loader,
             hierarchy_manager=hierarchy_manager
         )
+        
+        # 设置工具执行权限模式
+        if args.auto_mode is not None:
+            auto_mode = args.auto_mode == 'true'
+            agent.tool_executor.set_task_permission(args.task_id, auto_mode)
         
         result = agent.run(args.task_id, args.user_input)
         

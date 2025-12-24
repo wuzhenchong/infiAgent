@@ -9,12 +9,21 @@ from utils.windows_compat import safe_print
 import requests
 import yaml
 import json
+import time
+import uuid
 from typing import Dict, Any
 from pathlib import Path
 
 
 class ToolExecutor:
     """工具执行器 - 通过HTTP调用toolServer"""
+    
+    # 危险工具列表（需要用户确认）
+    DANGEROUS_TOOLS = [
+        "file_write",      # 文件写入
+        "pip_install",     # 安装包
+        "execute_code",    # 执行代码
+    ]
     
     def __init__(self, config_loader, hierarchy_manager):
         """
@@ -30,6 +39,9 @@ class ToolExecutor:
         
         # 从tool_config.yaml读取toolServer URL
         self.tools_server_url = self._load_tools_server_url()
+        
+        # 权限管理：task_id → auto_mode 映射
+        self.task_permissions = {}  # {task_id: {"auto_mode": True/False}}
     
     def _load_tools_server_url(self) -> str:
         """从配置文件加载工具服务器URL"""
@@ -45,6 +57,15 @@ class ToolExecutor:
         except Exception as e:
             safe_print(f"⚠️ 加载工具服务器配置失败: {e}，使用默认值")
             return "http://127.0.0.1:8001"
+    
+    def set_task_permission(self, task_id: str, auto_mode: bool):
+        """设置任务的权限模式"""
+        self.task_permissions[task_id] = {"auto_mode": auto_mode}
+        safe_print(f"🔐 任务权限设置: {task_id} → auto_mode={auto_mode}")
+    
+    def is_auto_mode(self, task_id: str) -> bool:
+        """检查任务是否为自动模式（默认 True）"""
+        return self.task_permissions.get(task_id, {}).get("auto_mode", True)
     
     def _ensure_task_exists(self, task_id: str):
         """确保任务在toolServer中存在"""
@@ -74,6 +95,68 @@ class ToolExecutor:
         except Exception as e:
             safe_print(f"⚠️ 检查/创建任务时出错: {e}")
     
+    def _request_tool_confirmation(self, tool_name: str, arguments: Dict[str, Any], task_id: str) -> bool:
+        """
+        请求工具执行确认
+        
+        Returns:
+            True - 用户批准执行
+            False - 用户拒绝执行
+        """
+        try:
+            # 生成唯一确认ID
+            confirm_id = f"confirm_{tool_name}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            
+            # 创建确认请求
+            create_url = f"{self.tools_server_url}/api/tool-confirmation/create"
+            create_payload = {
+                "confirm_id": confirm_id,
+                "task_id": task_id,
+                "tool_name": tool_name,
+                "arguments": arguments
+            }
+            
+            response = requests.post(create_url, json=create_payload, timeout=5)
+            if response.status_code != 200:
+                safe_print(f"⚠️  创建确认请求失败，默认拒绝执行")
+                return False
+            
+            safe_print(f"⏸️  等待用户确认: {tool_name}")
+            
+            # 轮询等待用户响应（最多等待 300 秒）
+            max_wait = 300
+            check_interval = 2
+            elapsed = 0
+            
+            status_url = f"{self.tools_server_url}/api/tool-confirmation/{confirm_id}"
+            
+            while elapsed < max_wait:
+                time.sleep(check_interval)
+                elapsed += check_interval
+                
+                try:
+                    status_response = requests.get(status_url, timeout=5)
+                    if status_response.status_code == 200:
+                        result = status_response.json()
+                        
+                        if result.get("found") and result.get("status") == "completed":
+                            approved = result.get("result") == "approved"
+                            if approved:
+                                safe_print(f"✅ 用户批准执行: {tool_name}")
+                            else:
+                                safe_print(f"❌ 用户拒绝执行: {tool_name}")
+                            return approved
+                except Exception:
+                    continue
+            
+            # 超时，默认拒绝
+            safe_print(f"⏱️  确认超时，拒绝执行: {tool_name}")
+            return False
+            
+        except Exception as e:
+            safe_print(f"❌ 确认请求失败: {e}，拒绝执行")
+            return False
+    
     def execute(self, tool_name: str, arguments: Dict[str, Any], task_id: str) -> Dict:
         """
         执行工具调用
@@ -101,16 +184,25 @@ class ToolExecutor:
             
             # 判断是普通工具还是子Agent
             if tool_type == "tool_call_agent":
+                # 检查是否为危险工具且需要确认
+                if tool_name in self.DANGEROUS_TOOLS and not self.is_auto_mode(task_id):
+                    # 请求用户确认
+                    approved = self._request_tool_confirmation(tool_name, arguments, task_id)
+                    
+                    if not approved:
+                        # 用户拒绝执行
+                        return {
+                            "status": "error",
+                            "output": "",
+                            "error_information": f"工具执行被用户拒绝: {tool_name}"
+                        }
+                
                 # 普通工具 - 通过HTTP调用toolServer
                 return self._call_toolserver(tool_name, arguments, task_id)
             
             elif tool_type == "llm_call_agent":
                 # 子Agent - 递归调用
-                # 给 task_input 添加随机后缀（避免同样输入的缓存冲突）
-                import uuid
-                original_input = arguments.get("task_input", "")
-                random_suffix = f" [call-{uuid.uuid4().hex[:8]}]"
-                arguments["task_input"] = original_input + random_suffix
+                # 注意：uuid 已在 agent_executor 中添加（仅对 level != 0）
                 return self._execute_sub_agent(tool_name, tool_config, arguments, task_id)
             
             else:

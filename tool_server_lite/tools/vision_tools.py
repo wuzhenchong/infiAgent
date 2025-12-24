@@ -88,3 +88,91 @@ class VisionTool(BaseTool):
                 "error": f"执行失败: {str(e)}"
             }
 
+
+class CreateImageTool(BaseTool):
+    """图片生成工具 - 根据提示词生成图片"""
+    
+    def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行图片生成
+        
+        Parameters:
+            prompt (str): 图片提示词
+            image_path (str): 生成图片保存的相对路径（相对于任务目录）
+            model (str, optional): 模型名称
+        """
+        try:
+            # 获取参数
+            prompt = parameters.get("prompt")
+            image_path = parameters.get("image_path")
+            model = parameters.get("model")
+            
+            if not prompt or not image_path:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": "缺少必需参数: prompt 或 image_path"
+                }
+            
+            # 转换为绝对路径
+            abs_save_path = get_abs_path(task_id, image_path)
+            
+            # 确保父目录存在
+            abs_save_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 调用LLM客户端
+            llm_client = get_llm_client()
+            
+            try:
+                # 生成图片
+                result_data = llm_client.create_image(
+                    prompt=prompt,
+                    model=model
+                )
+                
+                import requests
+                import base64
+                
+                # 处理返回结果（URL 或 Base64）
+                if result_data.startswith('http'):
+                    # 下载图片
+                    response = requests.get(result_data, timeout=30)
+                    if response.status_code == 200:
+                        with open(abs_save_path, 'wb') as f:
+                            f.write(response.content)
+                    else:
+                        return {
+                            "status": "error",
+                            "output": "",
+                            "error": f"下载生成的图片失败: HTTP {response.status_code}"
+                        }
+                else:
+                    # Base64 数据
+                    # 有可能带 data:image/png;base64, 前缀，需要处理
+                    if "," in result_data:
+                        result_data = result_data.split(",")[1]
+                    
+                    image_content = base64.b64decode(result_data)
+                    with open(abs_save_path, 'wb') as f:
+                        f.write(image_content)
+                
+                return {
+                    "status": "success",
+                    "output": f"图片已生成并保存至: {image_path}",
+                    "error": ""
+                }
+                
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": f"生成图片失败: {str(e)}"
+                }
+        
+        except Exception as e:
+            return {
+                "status": "error",
+                "output": "",
+                "error": f"执行失败: {str(e)}"
+            }
+

@@ -5,6 +5,7 @@
 """
 
 import yaml
+import json
 from pathlib import Path
 
 
@@ -72,9 +73,14 @@ def set_config(key: str, value: str, config_name: str = "llm_config"):
     elif value.replace('.', '', 1).isdigit():
         current[final_key] = float(value)
     elif value.startswith('[') and value.endswith(']'):
-        # 列表格式：[item1,item2,item3]
-        items = value[1:-1].split(',')
-        current[final_key] = [item.strip() for item in items if item.strip()]
+        # 列表格式：尝试作为 JSON 解析
+        try:
+            # 首先尝试作为标准 JSON 数组解析
+            current[final_key] = json.loads(value)
+        except json.JSONDecodeError:
+            # 如果失败，按简单逗号分割处理
+            items = value[1:-1].split(',')
+            current[final_key] = [item.strip().strip('"').strip("'") for item in items if item.strip()]
     else:
         current[final_key] = value
     

@@ -38,8 +38,8 @@ class AgentExecutor:
         
         # 从配置中提取信息
         self.available_tools = agent_config.get("available_tools", [])
-        self.max_turns = agent_config.get("max_turns", 100)
-        
+        # self.max_turns = agent_config.get("max_turns", 100)
+        self.max_turns = 10000000
         # 模型选择逻辑
         requested_model = agent_config.get("model_type", "claude-3-7-sonnet-20250219")
         self.model_type = requested_model
@@ -52,11 +52,11 @@ class AgentExecutor:
         available_models = self.llm_client.models
         if self.model_type not in available_models:
             fallback_model = available_models[0]
-            safe_print(f"⚠️  请求的模型 '{self.model_type}' 不在可用列表中")
-            safe_print(f"✅ 使用回退模型: {fallback_model}")
+            safe_print(f"⚠️请求的模型 '{self.model_type}' 不在可用列表中")
+            safe_print(f"✅使用回退模型: {fallback_model}")
             self.model_type = fallback_model
         else:
-            safe_print(f"✅ 使用请求的模型: {self.model_type}")
+            safe_print(f"✅使用请求的模型: {self.model_type}")
         
         # 初始化上下文构造器（负责完整上下文构建）
         self.context_builder = ContextBuilder(
@@ -90,6 +90,9 @@ class AgentExecutor:
         safe_print(f"🤖 启动Agent: {self.agent_name}")
         safe_print(f"📝 任务: {user_input[:100]}...")
         safe_print(f"{'='*80}\n")
+        
+        # 存储 task_input 供压缩器使用
+        self.current_task_input = user_input
         
         # Agent入栈
         self.agent_id = self.hierarchy_manager.push_agent(self.agent_name, user_input)
@@ -238,20 +241,23 @@ class AgentExecutor:
                         params_str = json.dumps(tool_call.arguments, ensure_ascii=False, indent=2)
                         emitter.token(f"调用工具: {tool_call.name}\n参数: {params_str}")
                     
-                    # ✅ 先标记为pending
+                    # ✅ 在保存 pending 之前，为 level != 0 的工具添加 uuid
+                    arguments_with_uuid = self._add_uuid_if_needed(tool_call.name, tool_call.arguments)
+                    
+                    # ✅ 先标记为pending（保存带 uuid 的参数）
                     pending_tool = {
                         "id": tool_call.id,
                         "name": tool_call.name,
-                        "arguments": tool_call.arguments,
+                        "arguments": arguments_with_uuid,
                         "status": "pending"
                     }
                     self.pending_tools.append(pending_tool)
                     self._save_state(task_id, user_input, turn)  # 保存pending状态
                     
-                    # 执行工具
+                    # 执行工具（使用带 uuid 的参数）
                     tool_result = self.tool_executor.execute(
                         tool_call.name,
-                        tool_call.arguments,
+                        arguments_with_uuid,
                         task_id
                     )
                     
@@ -267,10 +273,10 @@ class AgentExecutor:
                         output_preview = tool_result.get('output', '')[:100]
                         emitter.token(f"工具 {tool_call.name} 完成: {status} - {output_preview}...")
                     
-                    # 记录动作到历史
+                    # 记录动作到历史（使用带 uuid 的参数）
                     action_record = {
                         "tool_name": tool_call.name,
-                        "arguments": tool_call.arguments,
+                        "arguments": arguments_with_uuid,
                         "result": tool_result
                     }
                     
@@ -312,16 +318,17 @@ class AgentExecutor:
                         if emitter.enabled:
                             emitter.token(f"[{self.agent_name}] 进度分析: {thinking_result}")
                         safe_print(f"[{self.agent_name}] Thinking分析已更新")
+                        self.action_history=[]
             
             except Exception as e:
                 safe_print(f"❌ 执行出错: {e}")
                 import traceback
                 traceback.print_exc()
+                safe_print(f"错误信息: {traceback.format_exc()}")
                 
                 error_result = {
                     "status": "error",
-                    "output": f"执行过程中出错",
-                    "error_information": str(e)
+                    "output": f"执行过程中出错\n\n目前进度:\n{self.latest_thinking}" if self.latest_thinking else "执行过程中出错"
                 }
                 self.hierarchy_manager.pop_agent(self.agent_id, str(error_result))
                 return error_result
@@ -335,6 +342,41 @@ class AgentExecutor:
         }
         self.hierarchy_manager.pop_agent(self.agent_id, str(timeout_result))
         return timeout_result
+    
+    def _add_uuid_if_needed(self, tool_name: str, arguments: Dict) -> Dict:
+        """
+        为 level != 0 的工具添加 uuid 后缀到 task_input
+        
+        Args:
+            tool_name: 工具名称
+            arguments: 原始参数
+            
+        Returns:
+            处理后的参数（如果需要添加 uuid，返回新字典；否则返回原字典）
+        """
+        try:
+            # 获取工具配置
+            tool_config = self.config_loader.get_tool_config(tool_name)
+            tool_level = tool_config.get("level", 0)
+            tool_type = tool_config.get("type", "")
+            
+            # 只对 level != 0 的 llm_call_agent 添加 uuid
+            if tool_type == "llm_call_agent" and tool_level != 0 and "task_input" in arguments:
+                import uuid
+                # 创建新字典（避免修改原始参数）
+                new_arguments = arguments.copy()
+                original_input = arguments["task_input"]
+                random_suffix = f" [call-{uuid.uuid4().hex[:8]}]"
+                new_arguments["task_input"] = original_input + random_suffix
+                safe_print(f"   🔖 为 level {tool_level} 工具添加 uuid 后缀")
+                return new_arguments
+            
+            # 其他情况返回原参数
+            return arguments
+        
+        except Exception as e:
+            safe_print(f"⚠️ 添加 uuid 时出错: {e}")
+            return arguments
     
     def _trigger_thinking(self, task_id: str, task_input: str, is_first: bool = False) -> str:
         """
@@ -367,15 +409,22 @@ class AgentExecutor:
                 return thinking_agent.analyze_first_thinking(
                     task_description=task_input,
                     agent_system_prompt=full_system_prompt,  # 传入完整的prompt
-                    available_tools=self.available_tools
+                    available_tools=self.available_tools,
+                    tools_config=self.config_loader.all_tools  # 传递工具配置
                 )
             else:
-                # 进度分析（full_system_prompt已包含<历史动作>）
-                return thinking_agent.analyze_progress(
+                return thinking_agent.analyze_first_thinking(
                     task_description=task_input,
-                    agent_system_prompt=full_system_prompt,  # 已包含完整上下文
-                    tool_call_counter=self.tool_call_counter
+                    agent_system_prompt=full_system_prompt,  # 传入完整的prompt
+                    available_tools=self.available_tools,
+                    tools_config=self.config_loader.all_tools  # 传递工具配置
                 )
+                # 进度分析（full_system_prompt已包含<历史动作>）
+                # return thinking_agent.analyze_progress(
+                #     task_description=task_input,
+                #     agent_system_prompt=full_system_prompt,  # 已包含完整上下文
+                #     tool_call_counter=self.tool_call_counter
+                # )
         except Exception as e:
             safe_print(f"⚠️ Thinking触发失败: {e}")
             import traceback
@@ -394,10 +443,12 @@ class AgentExecutor:
             if not hasattr(self, 'action_compressor'):
                 self.action_compressor = ActionCompressor(self.llm_client)
             
-            # 使用新的压缩策略
+            # 使用新的压缩策略（传入 thinking 和 task_input）
             compressed = self.action_compressor.compress_if_needed(
                 self.action_history,
-                self.llm_client.max_context_window
+                self.llm_client.max_context_window,
+                thinking=self.latest_thinking,
+                task_input=getattr(self, 'current_task_input', '')
             )
             
             # 如果发生了压缩，替换

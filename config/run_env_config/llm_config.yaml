@@ -4,4 +4,10 @@ max_context_window: 200000
 base_url: https://openrouter.ai/api/v1
 api_key: your-api-key-here
 models:
-- openai/google/gemini-2.5-flash
+- openai/google/gemini-3-flash-preview
+figure_models:
+- google/gemini-3-pro-image-preview
+compressor_models:
+- openai/google/gemini-3-flash-preview
+read_figure_models:
+- openai/google/gemini-3-flash-preview

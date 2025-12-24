@@ -58,6 +58,9 @@ class LLMClientLite:
         self.base_url = self.config.get("base_url", "")
         self.api_key = self.config.get("api_key", "")
         self.models = self.config.get("models", [])
+        self.figure_models = self.config.get("figure_models", [])
+        self.compressor_models = self.config.get("compressor_models", [])
+        self.read_figure_models = self.config.get("read_figure_models", [])
         self.temperature = self.config.get("temperature", 0)
         self.max_tokens = self.config.get("max_tokens", 0)
         
@@ -131,7 +134,7 @@ class LLMClientLite:
         
         # 选择模型
         if model is None:
-            model = self.models[0]
+            model = self.read_figure_models[0]
         
         # 调用LLM
         try:
@@ -151,6 +154,90 @@ class LLMClientLite:
                 
         except Exception as e:
             raise Exception(f"调用LLM Vision API失败: {str(e)}")
+
+    def create_image(
+        self,
+        prompt: str,
+        model: Optional[str] = None
+    ) -> str:
+        """
+        调用模型生成图片（使用 chat completion API + modalities）
+        
+        Args:
+            prompt: 提示词
+            model: 模型名称，默认使用 figure_models 中的第一个
+            
+        Returns:
+            图片的 base64 数据 URL（格式：data:image/png;base64,...）
+        """
+        if model is None:
+            if self.figure_models:
+                # 兼容字符串或字典格式
+                first_model = self.figure_models[0]
+                model = first_model if isinstance(first_model, str) else first_model.get("name")
+            else:
+                model = "dall-e-3"
+        
+        try:
+            # 直接使用 requests 调用 OpenRouter API
+            # 因为 LiteLLM 在解析响应时会丢失 images 字段
+            import requests
+            
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            
+            payload = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "modalities": ["image", "text"]
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=120
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"API 请求失败，状态码: {response.status_code}，响应: {response.text}")
+            
+            result = response.json()
+            
+            # 从响应中提取图片
+            if result.get("choices") and len(result["choices"]) > 0:
+                message = result["choices"][0].get("message", {})
+                
+                # 检查是否有 images 字段
+                images = message.get("images")
+                if images and len(images) > 0:
+                    # 返回第一张图片的 URL（base64 数据）
+                    first_image = images[0]
+                    
+                    # images 是字典数组，结构类似 [{"image_url": {"url": "data:image/..."}}]
+                    if isinstance(first_image, dict):
+                        image_url = first_image.get("image_url", {}).get("url")
+                        if image_url:
+                            print(f"[INFO] 成功生成图片，URL 长度: {len(image_url)}")
+                            return image_url
+                        else:
+                            raise Exception(f"图片数据格式异常: {first_image}")
+                    else:
+                        raise Exception(f"未知的图片格式: {type(first_image)}")
+                else:
+                    raise Exception(f"模型响应中没有图片数据。Message keys: {list(message.keys())}")
+            else:
+                raise Exception(f"模型未返回有效响应")
+                
+        except Exception as e:
+            raise Exception(f"生成图片失败: {str(e)}")
     
     def audio_query(
         self,

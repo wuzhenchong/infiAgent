@@ -20,7 +20,7 @@ from .arxiv_tools import ArxivSearchTool
 
 from .document_tools import ParseDocumentTool
 
-from .vision_tools import VisionTool
+from .vision_tools import VisionTool, CreateImageTool
 
 from .audio_tools import AudioTool
 
@@ -54,6 +54,7 @@ __all__ = [
     "FileDownloadTool",
     "ParseDocumentTool",
     "VisionTool",
+    "CreateImageTool",
     "AudioTool",
     "PaperAnalyzeTool",
     "MarkdownToPdfTool",

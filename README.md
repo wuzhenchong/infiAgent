@@ -1,880 +1,799 @@
-# MLA V3 快速入门指南
+# MLA V3 - Build Domain-Specific SOTA-Level AI Agents
 
-5分钟快速上手 MLA Agent 系统。
+<p align="center">
+  <img src="https://img.shields.io/badge/version-3.0.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/python-3.9+-green.svg" alt="Python">
+  <img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License">
+</p>
+
+## 🌟 Introduction
+
+**MLA (Multi-Level Agent)** is an agent framework designed for **unlimited runtime** without tool calling chaos or system crashes caused by cumulative task resources and conversation history. With MLA, you can build powerful general-purpose and semi-specialized agents simply by writing configuration files.
+
+### Key Features
+
+- ✅ **Unlimited Runtime**: No degradation from context accumulation
+- ✅ **Multi-Level Agent Hierarchy**: Serial execution with tree-structured agent orchestration
+- ✅ **Zero Context Compression**: File-based state management eliminates the need for context compression
+- ✅ **Task Memory**: Persistent memory across sessions using workspace as task ID
+- ✅ **Complete Research Workflows**: From literature search to experiments, plotting, and LaTeX papers
+
+### Default Configuration
+
+The default configuration in this repository is a **research-oriented semi-specialized agent** capable of:
+
+- 📝 **Academic Paper Writing**: Complete end-to-end workflow from research to LaTeX submission
+- ✅ **Human-Level Quality**: Papers can pass EI/IEEE conference peer reviews
+- 🧪 **Scientific Computing**: ECM protein simulation, logistics scheduling, assignment grading, etc.
+- 🔬 **Full Research Pipeline**: Literature collection, experiments, figures, and paper drafting
 
 ---
 
-## 🚀 快速开始（5分钟）
-更多安装教程- [安装指南](INSTALL.md) - 安装和配置
+## 🎬 See It In Action
 
-### 步骤 1: 安装
+Watch MLA generate complete academic papers end-to-end:
+
+**Demo 1:w**
+
+<p align="center">
+  <img src="assets/paper_generation_demo_1.gif" alt="Paper Generation Demo 1" width="800">
+</p>
+
+**Demo 2:**
+
+<p align="center">
+  <img src="assets/paper_generation_demo_2.gif" alt="Paper Generation Demo 2" width="800">
+</p>
+
+MLA handles the entire research workflow - from literature search and experiment design to code execution, figure generation, and LaTeX paper writing. All automatically orchestrated through multi-level agents.
+
+---
+
+## 📚 Table of Contents
+
+- [See It In Action](#-see-it-in-action)
+- [Quick Start](#-quick-start)
+- [Configuration Guide](#-configuration-guide)
+- [CLI Interface](#-cli-interface)
+- [SDK Integration](#-sdk-integration)
+- [Example Outputs](#-example-outputs)
+- [How It Works](#-how-it-works)
+
+---
+
+## 🚀 Quick Start
+
+### Installation
+
+**1. Install the package**
 
 ```bash
 cd /path/to/MLA_V3
 pip install -e .
 ```
 
-### 步骤 2: 配置 API Key
+**2. Install Playwright (Required for web scraping)**
 
 ```bash
-# 查看当前配置 默认了 openrouter 为 baseurl
-mla-agent --config-show
-
-# 设置 API Key
-mla-agent --config-set api_key "sk-your-api-key-here"
-
-# 设置 Base URL（可选）
-mla-agent --config-set base_url "https://api.openai.com/v1"
-
-# 设置模型列表（可选）(第一个前缀取决于你的 base_url提供的响应格式，如果是 openai格式则使用 openai 前缀，然后再写入模型名称)
-mla-agent --config-set models "["openai/anthropic/claude-haiku-4.5"]"
+playwright install
 ```
 
+Or install only Chromium:
 
+```bash
+python -m playwright install chromium
+```
 
+**3. Configure API Keys**
 
+```bash
+# View current configuration (default: OpenRouter base URL)
+mla-agent --config-show
 
-### 步骤 3: 启动工具服务器
+# Set API Key
+mla-agent --config-set api_key "sk-your-api-key-here"
+
+# Set Base URL (optional)
+mla-agent --config-set base_url "https://api.openai.com/v1"
+
+# Set Model List (optional)
+# Note: Add 'openai/' prefix if your provider returns OpenAI-compatible format
+mla-agent --config-set models '["openai/anthropic/claude-sonnet-4"]'
+```
+
+**Important Configuration Notes:**
+- For most parameters, add the `openai/` prefix even if the parameter already contains "openai" (due to system routing requirements)
+- Exception: `figure_models` only supports OpenRouter and does not need the prefix
+- Example: `figure_models: ["google/gemini-2.0-flash-thinking-exp-01-21"]`
+
+**4. Start Tool Server**
 
 ```bash
 mla-tool-server start
 ```
 
-### 步骤 4: 运行第一个任务
+<!-- **5. Run Your First Task**
 
 ```bash
 mkdir -p ~/my_first_task
 
 mla-agent \
   --task_id ~/my_first_task \
-  --user_input "查看工作目录内有什么文件夹"
+  --user_input "List files in the working directory"
 ```
 
-**完成！** 🎉
+**🎉 Done!** Your first agent is running. -->
+
+### Using CLI Mode run your first task
+
+```bash
+mla-agent --cli
+```
+
+
 
 ---
 
-## 📚 详细命令教程
+## ⚙️ Configuration Guide
 
-### mla-tool-server - 工具服务器管理
+MLA uses YAML files for agent and tool configuration. Configuration files are located in:
 
-#### 启动服务
-
-```bash
-# 后台启动（推荐）
-mla-tool-server start
-
-# 前台运行（查看日志）
-mla-tool-server
-
-# 自定义端口
-mla-tool-server start --port 8002
+```
+config/
+├── agent_library/
+│   └── Default/                    # Default agent system
+│       ├── general_prompts.yaml    # Shared prompts
+│       ├── level_-1_judge_agent.yaml  # Judge agent
+│       ├── level_0_tools.yaml      # Tool definitions
+│       ├── level_1_agents.yaml     # Low-level agents
+│       ├── level_2_agents.yaml     # Mid-level agents
+│       └── level_3_agents.yaml     # Top-level agents
+└── run_env_config/
+    ├── llm_config.yaml             # LLM settings
+    └── tool_config.yaml            # Tool server settings
 ```
 
-#### 管理服务
+### Key Configuration Files
+
+#### 1. `llm_config.yaml` - LLM Configuration
+
+```yaml
+api_key: "your-api-key"
+base_url: "https://openrouter.ai/api/v1"
+models:
+  - "openai/anthropic/claude-sonnet-4"
+  - "openai/anthropic/claude-haiku-4.5"
+temperature: 0.7
+max_tokens: 8000
+figure_models:
+  - "google/gemini-2.0-flash-thinking-exp-01-21"
+```
+
+**Note**: Copy `llm_config.example.yaml` to `llm_config.yaml` to get started.
+
+#### 2. Agent Hierarchy
+
+MLA organizes agents into levels:
+
+- **Level 3**: Top-level orchestrators (e.g., `alpha_agent`)
+- **Level 2**: Functional specialists (e.g., `data_collection_agent`, `coder_agent`)
+- **Level 1**: Basic executors (e.g., `web_search_agent`)
+- **Level 0**: Tool definitions
+- **Level -1**: Quality control (e.g., `judge_agent`)
+
+#### 3. Creating Custom Agents
+
+Edit YAML files to customize agent behavior:
+
+```yaml
+news_agent:
+  type: llm_call_agent
+  level: 1
+  model_type: "advanced"
+  available_tools:
+    - data_collection_agent
+    - coder_agent
+    ...
+  system_prompt: |
+    You are a newspaper agent.
+```
+
+---
+
+## 💻 CLI Interface
+
+### Interactive Mode
+
+Start the CLI for a conversational experience:
 
 ```bash
-# 查看状态
-mla-tool-server status
-# 输出:
-# ✅ Tool Server 运行中
-#    PID: 12345
-#    地址: http://localhost:8001
+mla-agent --cli
+```
 
-# 停止服务
+**Key Features:**
+
+- 🔄 **Multi-turn conversations** with persistent context
+- 🤖 **Agent switching** with `@agent_name` syntax
+- 🔔 **Automatic HIL detection** with audio alerts
+- ⚠️ **Tool execution confirmation** in manual mode
+- ⏸️ **Interrupt and resume** support (Ctrl+C to pause)
+- 🎨 **Rich terminal UI** powered by `prompt_toolkit` and `rich`
+
+**Usage Examples:**
+
+```bash
+# Direct task input (uses default agent)
+[alpha_agent] > Collect papers on Transformers
+
+# Switch agent and execute task
+[alpha_agent] > @data_collection_agent Search for recent NLP papers
+
+# Switch default agent only
+[alpha_agent] > @coder_agent
+✅ Switched to: coder_agent
+[coder_agent] > 
+```
+
+**CLI Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show help and available commands |
+| `/agents` | List all available agents |
+| `/resume` | Resume interrupted tasks |
+| `/quit` or `/exit` | Exit CLI mode |
+| `Ctrl+C` | Interrupt current task (stays in CLI) |
+| `Ctrl+D` | Exit CLI immediately |
+
+**Human-in-Loop (HIL) Handling:**
+
+When an agent requests human input, the CLI automatically detects it:
+
+```
+🔔🔔🔔 Detected HIL task! Press Enter to handle... 🔔🔔🔔
+================================================================================
+🔔 Human Interaction Task (HIL)
+================================================================================
+📝 Task ID: upload_file_20250124
+📋 Instruction: Please upload the required dataset files...
+================================================================================
+💡 Enter your response (any text)
+   Type /skip to skip this task
+================================================================================
+
+[alpha_agent] HIL Response > Files uploaded successfully
+✅ HIL task responded
+```
+
+**Tool Confirmation (Manual Mode):**
+
+When `--auto-mode false` is set, each tool execution requires confirmation:
+
+```
+⚠️⚠️⚠️ Detected tool execution request! Press Enter to confirm... ⚠️⚠️⚠️
+================================================================================
+⚠️  Tool Execution Confirmation Request
+================================================================================
+🔧 Tool Name: python_run
+📝 Confirmation ID: confirm_12345
+📋 Parameters:
+     code: import numpy as np...
+     timeout: 300
+================================================================================
+💡 Choose action:
+   yes / y - Approve execution
+   no / n  - Reject execution
+================================================================================
+
+[alpha_agent] Confirm [yes/no] > yes
+✅ Approved tool execution: python_run
+```
+
+**Screenshot:** *(User will provide)*
+
+---
+
+### Command-Line Mode
+
+For scripting and automation:
+
+```bash
+mla-agent \
+  --task_id /path/to/workspace \
+  --user_input "Your task description" \
+  --agent_name alpha_agent
+```
+
+**Common Parameters:**
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `--task_id` | Workspace path (absolute) | Required |
+| `--user_input` | Task description | Required |
+| `--agent_name` | Agent to invoke | `alpha_agent` |
+| `--agent_system` | Agent library name | `Default` |
+| `--cli` | Interactive CLI mode | `false` |
+| `--jsonl` | JSONL output mode | `false` |
+| `--force-new` | Clear all state and start fresh | `false` |
+| `--auto-mode` | Tool execution mode (`true`/`false`) | Auto-detect |
+
+**Auto-Mode Examples:**
+
+```bash
+# Automatic tool execution (no confirmation needed)
+mla-agent --task_id ~/project --user_input "Task" --auto-mode true
+
+# Manual confirmation for each tool
+mla-agent --task_id ~/project --user_input "Task" --auto-mode false
+```
+
+---
+
+### Managing Tool Server
+
+```bash
+# Start server (background)
+mla-tool-server start
+
+# Check status
+mla-tool-server status
+
+# Stop server
 mla-tool-server stop
 
-# 重启服务
+# Restart server
 mla-tool-server restart
 ```
 
 ---
 
-### mla-agent - Agent 执行器
+## 🔌 SDK Integration
 
-#### 基础用法
-
-```bash
-mla-agent \
-  --task_id /absolute/path/to/workspace \
-  --user_input "你的任务描述"
-```
-
-#### 完整参数
-
-```bash
-mla-agent \
-  --task_id /path/to/workspace \
-  --user_input "任务描述" \
-  --agent_name writing_agent \
-  --agent_system Test_agent \
-  --jsonl \
-  --force-new
-```
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--task_id` | 工作空间绝对路径（必需） | - |
-| `--user_input` | 任务描述（必需） | - |
-| `--agent_name` | Agent 名称 | writing_agent |
-| `--agent_system` | Agent 系统 | Test_agent |
-| `--jsonl` | JSONL 输出模式 | false |
-| `--force-new` | 强制新任务（清空状态） | false |
+MLA provides two SDK options: **Python SDK** for direct integration and **JSONL mode** for IDE plugins.
 
 ---
 
-### 配置管理
+### Python SDK
 
-```bash
-# 查看配置
-mla-agent --config-show
+Import and use MLA components directly in your Python code:
 
-# 设置 API Key
-mla-agent --config-set api_key "YOUR_KEY"
+```python
+from pathlib import Path
+from utils.config_loader import ConfigLoader
+from core.hierarchy_manager import get_hierarchy_manager
+from core.agent_executor import AgentExecutor
 
-# 设置 Base URL
-mla-agent --config-set base_url "https://api.openai.com/v1"
+# Initialize components
+task_id = str(Path.home() / "my_project")
+agent_system = "Default"
 
-# 设置模型
-mla-agent --config-set models "[gpt-4o,gpt-4o-mini]"
+config_loader = ConfigLoader(agent_system)
+hierarchy_manager = get_hierarchy_manager(task_id)
 
-# 设置温度
-mla-agent --config-set temperature "0.7"
+# Get agent configuration
+agent_config = config_loader.get_tool_config("alpha_agent")
+
+# Create and run agent
+agent = AgentExecutor(
+    agent_name="alpha_agent",
+    agent_config=agent_config,
+    config_loader=config_loader,
+    hierarchy_manager=hierarchy_manager
+)
+
+# Execute task
+result = agent.run(
+    task_id=task_id,
+    user_input="Write a survey paper on Transformers"
+)
+
+print(f"Status: {result['status']}")
+print(f"Output: {result['output']}")
 ```
+
+**Advanced: Custom Agent with Tool Permissions**
+
+```python
+# Set tool execution mode
+agent.tool_executor.set_task_permission(task_id, auto_mode=True)
+
+# Run with custom configuration
+result = agent.run(task_id, user_input)
+
+if result['status'] == 'success':
+    print("Task completed successfully!")
+else:
+    print(f"Error: {result.get('error_information')}")
+```
+
+**Use Cases for Python SDK:**
+- 🔧 Building custom workflows
+- 🤖 Embedding agents in existing applications
+- 📊 Batch processing multiple tasks
+- 🔬 Research experiments with programmatic control
 
 ---
 
-## 🤖 可用 Agent
+### JSONL Mode for IDE Plugins
 
-### Level 3 - 顶层 Agent
-
-#### writing_agent ⭐ （默认）
-
-**职责**: 科研助手，完成从学术论文到资料查找的全流程工作
-
-**能力**:
-- 学术论文写作（完整流程）
-- 文献资料收集
-- 实验设计与执行
-- 数据分析与可视化
-- 基于历史任务的互动协作
-
-**典型工作流程**:
-1. 调用 data_collection_agent 收集文献
-2. 调用 get_idea_and_experiment_plan 获取实验方案
-3. 调用 coder_agent 完成代码实验
-4. 调用 data_to_figures_agent 生成图表
-5. 调用 material_to_document_agent 撰写论文
-6. 调用 judge_agent 验证质量
-7. 使用 final_output 输出结果
-
-**适用场景**:
-- 学术论文写作
-- 研究报告生成
-- 文献综述
-- 实验数据分析
-- 一般性查询和互动
-
-**示例**:
-```bash
-mla-agent \
-  --task_id ~/research_project \
-  --user_input "写一篇关于Transformer的综述论文"
-```
-
----
-
-### Level 2 - 功能 Agent
-
-#### data_collection_agent
-
-**职责**: 根据任务场景收集数据（论文、网页资料等）
-
-**工作流程**:
-1. 使用 web_search_agent 搜索相关文献
-2. 使用 get_searchPdf_by_doi_or_title 下载 PDF
-3. 使用 judge_agent 验证收集质量
-
-**适用场景**:
-- 学术文献收集
-- 网页资料搜集
-- 特定主题的资料整理
-
-**示例**:
-```bash
-mla-agent \
-  --task_id ~/literature_review \
-  --agent_name data_collection_agent \
-  --user_input "收集2020-2024年关于强化学习的论文"
-```
-
----
-
-#### get_idea_and_experiment_plan
-
-**职责**: 基于现有资料生成研究方向和实验方案
-
-**核心理念**:
-- 聚焦1-3篇文章的方向
-- 研究问题单一、明确、可实现
-- 考虑实际计算资源限制
-
-**工作流程**:
-1. 使用 summary_from_one_paper 总结论文
-2. 使用 answer_from_one_paper 获取详细知识
-3. 设计具体实验方案（包括数据、baseline、分析）
-4. 必要时使用 human_in_loop 请求用户提供资源
-5. 输出 JSON/Markdown 格式的实验计划
-
-**输出内容**:
-- 研究 idea
-- 实验方案
-- 实验数据设计
-- 预期结果
-- 数据表格结构
-
-**示例**:
-```bash
-mla-agent \
-  --task_id ~/experiment_design \
-  --agent_name get_idea_and_experiment_plan \
-  --user_input "基于已收集的文献，设计A*算法改进实验"
-```
-
----
-
-#### coder_agent
-
-**职责**: 完成代码实验和编程任务
-
-**能力**:
-- Python 代码编写
-- 实验代码实现
-- 单元测试编写
-- 代码调试和优化
-
-**工作流程**:
-1. 分析实验计划
-2. 编写代码实现
-3. 执行测试
-4. 优化和调试
-
-**示例**:
-```bash
-mla-agent \
-  --task_id ~/coding_project \
-  --agent_name coder_agent \
-  --user_input "实现A*算法的三种启发函数并进行性能测试"
-```
-
----
-
-#### data_to_figures_agent
-
-**职责**: 将实验数据转换为学术图表
-
-**能力**:
-- 数据可视化
-- 生成高质量图表（300 DPI）
-- 多种图表类型（折线图、柱状图、散点图等）
-
-**输出**:
-- PNG 格式图表
-- 图表描述文档
-
-**示例**:
-```bash
-mla-agent \
-  --task_id ~/data_visualization \
-  --agent_name data_to_figures_agent \
-  --user_input "将实验结果数据生成对比图表"
-```
-
----
-
-#### material_to_document_agent
-
-**职责**: 将材料整合为学术文档
-
-**能力**:
-- 论文写作（LaTeX/Markdown）
-- 内容整合
-- 引用管理
-- 格式规范
-
-**适用场景**:
-- 学术论文撰写
-- 技术报告生成
-- 实验报告整理
-
-**示例**:
-```bash
-mla-agent \
-  --task_id ~/paper_writing \
-  --agent_name material_to_document_agent \
-  --user_input "基于实验数据和图表撰写论文"
-```
-
----
-
-## 💡 使用场景示例
-
-### 场景 1: 完整学术论文写作
-
-```bash
-# 1. 启动服务
-mla-tool-server start
-
-# 2. 创建项目目录
-mkdir -p ~/my_research_paper
-
-# 3. 运行 writing_agent（自动编排全流程）
-mla-agent \
-  --task_id ~/my_research_paper \
-  --user_input "写一篇关于深度强化学习的综述论文"
-
-# 4. 查看结果
-ls ~/my_research_paper/upload/
-# 预期输出: paper.tex, references.bib, figures/
-
-或者：
-  mlag-agent --cli 运行 cli 工具
-  （如果遇到了人机交互任务，打开新的 bash 窗口使用
-  mla-agent confirm read_project_files_20251020 --result "已完成阅读"
-  确认任务完成。）
-
-```
-
----
-
-### 场景 2: 文献收集
-
-```bash
-mla-agent \
-  --task_id ~/literature \
-  --agent_name data_collection_agent \
-  --user_input "收集Transformer模型相关的10篇近期论文"
-```
-
----
-
-### 场景 3: 实验设计
-
-```bash
-mla-agent \
-  --task_id ~/experiment \
-  --agent_name get_idea_and_experiment_plan \
-  --user_input "设计一个对比不同优化器性能的实验"
-```
-
----
-
-### 场景 4: 数据可视化
-
-```bash
-mla-agent \
-  --task_id ~/visualization \
-  --agent_name data_to_figures_agent \
-  --user_input "将 CSV 数据生成性能对比图表"
-```
-
----
-
-### 场景 5: VS Code 插件集成（JSONL 模式）
+MLA provides a JSONL streaming mode for real-time integration with IDEs and editors:
 
 ```bash
 mla-agent \
   --task_id $(pwd) \
-  --user_input "优化代码性能" \
+  --user_input "Optimize code performance" \
   --jsonl 2>/dev/null
 ```
 
-**输出**（每行一个 JSON）:
+**Output Format:**
+
 ```jsonl
-{"type":"start",...}
-{"type":"token","text":"加载配置..."}
-{"type":"progress","phase":"init","pct":10}
-{"type":"token","text":"[writing_agent] 初始规划: ..."}
-{"type":"token","text":"调用工具: dir_list"}
-{"type":"result","ok":true,"summary":"..."}
+{"type":"start","call_id":"c-1760936557-474c43","project":"~/project","agent":"alpha_agent","task":"Optimize..."}
+{"type":"token","text":"[alpha_agent] Analyzing code..."}
+{"type":"progress","phase":"execution","pct":30}
+{"type":"token","text":"Calling tool: code_analyzer"}
+{"type":"result","ok":true,"summary":"Optimization complete"}
 {"type":"end","status":"ok","duration_ms":5432}
 ```
 
----
+**Event Types:**
 
-## 🔄 中断与恢复
-
-### 中断任务
-
-任何时候按 `Ctrl+C` 安全中断：
-
-```bash
-mla-agent --task_id ~/project --user_input "长时间任务"
-# ... 按 Ctrl+C
-# 状态已自动保存
-```
-
-### 恢复任务（相同输入）
-
-```bash
-mla-agent --task_id ~/project --user_input "长时间任务"
-# 输出: ℹ️ 检测到相同任务，将续跑
-# 自动从断点继续
-```
-
-### 新任务（不同输入）
-
-```bash
-mla-agent --task_id ~/project --user_input "完全不同的任务"
-# 中断的任务自动归档到 history
-# 新任务可参考历史上下文
-```
-
-### 强制新任务
-
-```bash
-mla-agent --task_id ~/project --user_input "任务" --force-new
-# 清空所有状态，从头开始
-```
+| Event Type | Description | Key Fields |
+|------------|-------------|------------|
+| `start` | Task begins | `call_id`, `agent`, `task` |
+| `token` | Streaming text output | `text` |
+| `progress` | Progress update | `phase`, `pct` |
+| `result` | Task result | `ok`, `summary` |
+| `end` | Task completed | `status`, `duration_ms` |
+| `error` | Error occurred | `message` |
 
 ---
 
-## 🤝 人机交互（Human-in-Loop）
-
-### 触发场景
-
-Agent 在需要时会自动调用 `human_in_loop` 工具，暂停执行等待用户操作。
-
-### 完整示例（JSONL 模式）
-
-#### 步骤 1: Agent 触发 HIL
-
-```bash
-mla-agent \
-  --task_id ~/project \
-  --user_input "请求用户先阅读完项目内的文件再继续" \
-  --jsonl 2>/dev/null
-```
-
-**JSONL 输出**:
-```jsonl
-{"type":"start","call_id":"c-1760936557-474c43","project":"~/project","agent":"writing_agent","task":"请求用户先阅读完..."}
-{"type":"token","text":"[writing_agent] 初始规划: ..."}
-{"type":"token","text":"调用工具: dir_list\n参数: {\n  \"path\": \".\",\n  \"recursive\": true\n}"}
-{"type":"token","text":"工具 dir_list 完成: success - ..."}
-{"type":"token","text":"调用工具: human_in_loop\n参数: {\n  \"hil_id\": \"read_project_files_20251020\",\n  \"instruction\": \"请阅读完项目内的所有文件后再继续...文件清单如下：...\"\n}"}
-```
-
-**关键**: 此时 Agent 会阻塞等待，但 JSONL 事件已发出 `human_in_loop`
-
-#### 步骤 2: 用户操作（VS Code 插件处理）
-
-插件解析到 `human_in_loop` 事件后：
-- 提取 `hil_id`: `read_project_files_20251020`
-- 提取 `instruction`: "请阅读完项目内的所有文件后再继续..."
-- 显示 UI 给用户（对话框/侧边栏）
-
-#### 步骤 3: 完成 HIL 任务
-
-用户确认后，插件调用：
-
-```bash
-mla-agent confirm read_project_files_20251020 --result "已完成阅读"
-```
-
-**输出**:
-```
-✅ HIL 任务已完成: read_project_files_20251020
-   结果: 已完成阅读
-```
-
-#### 步骤 4: Agent 继续执行
-
-原 Agent 进程自动解除阻塞，继续输出 JSONL 事件：
-
-```jsonl
-{"type":"token","text":"工具 human_in_loop 完成: success - 人类任务已完成: 已完成阅读"}
-{"type":"token","text":"调用工具: final_output\n参数: {...}"}
-{"type":"result","ok":true,"summary":"任务完成..."}
-{"type":"end","status":"ok","duration_ms":58451}
-```
-
-### HIL 工具参数
-
-Agent 调用 `human_in_loop` 时的参数：
-
-```json
-{
-  "hil_id": "unique-id",          // 唯一标识
-  "instruction": "给用户的说明",   // 任务描述
-  "timeout": null                  // 超时时间（null=无限等待）
-}
-```
-
-### VS Code 插件集成代码
-
-```typescript
-// 解析 JSONL 事件
-child.stdout.on('data', (data) => {
-  data.toString().split('\n').forEach(line => {
-    if (!line.trim()) return;
-    
-    const event = JSON.parse(line);
-    
-    if (event.type === 'token' && event.text.includes('调用工具: human_in_loop')) {
-      // 提取参数（从 text 中解析或等待后续事件）
-      const match = event.text.match(/hil_id.*?:\s*"([^"]+)"/);
-      if (match) {
-        const hilId = match[1];
-        const instruction = extractInstruction(event.text);
-        
-        // 显示 UI
-        showHILDialog(hilId, instruction);
-      }
-    }
-  });
-});
-
-// 显示 HIL 对话框
-async function showHILDialog(hilId: string, instruction: string) {
-  const result = await vscode.window.showInformationMessage(
-    instruction,
-    '确认', '取消'
-  );
-  
-  // 用户确认后，完成 HIL
-  if (result === '确认') {
-    spawn('mla-agent', ['confirm', hilId, '--result', '用户已确认']);
-  } else {
-    spawn('mla-agent', ['confirm', hilId, '--result', '用户取消']);
-  }
-}
-```
-
-### 命令行测试 HIL
-
-#### 1. 手动触发 HIL（API）
-
-```bash
-curl -X POST http://localhost:8001/api/tool/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_id": "/path",
-    "tool_name": "human_in_loop",
-    "params": {
-      "hil_id": "TEST-001",
-      "instruction": "请确认是否继续"
-    }
-  }' &
-```
-
-#### 2. 查看 HIL 状态
-
-```bash
-curl http://localhost:8001/api/hil/TEST-001 | jq
-# {"found":true,"hil_id":"TEST-001","status":"waiting",...}
-```
-
-#### 3. 完成 HIL
-
-```bash
-mla-agent confirm TEST-001 --result "已确认"
-```
-
-### HIL 超时设置
-
-```json
-{
-  "hil_id": "timeout-test",
-  "instruction": "请在5分钟内确认",
-  "timeout": 300  // 5分钟后自动失败
-}
-```
-
-### 最佳实践
-
-**hil_id 命名建议**:
-```python
-# 使用时间戳 + 任务描述
-hil_id = f"upload_file_{datetime.now().strftime('%Y%m%d%H%M')}"
-hil_id = f"confirm_action_{uuid.uuid4().hex[:8]}"
-```
-
-**instruction 内容建议**:
-- 清晰说明需要用户做什么
-- 提供必要的上下文信息
-- 包含文件列表、选项等
-
-**超时设置**:
-- 文件上传：`timeout: 3600`（1小时）
-- 简单确认：`timeout: 300`（5分钟）
-- 长时间操作：`timeout: null`（无限等待）
-
----
-
-## 📂 文件位置
-
-### 工作空间结构
-
-```
-{task_id}/                     (您指定的绝对路径)
-├── upload/                    (上传/下载文件)
-├── code_run/                  (代码执行目录)
-└── code_env/                  (Python 虚拟环境)
-```
-
-### 对话历史
-
-```
-~/mla_v3/                      (用户主目录)
-└── conversations/             (所有任务的对话历史)
-    ├── {hash}_project_stack.json
-    ├── {hash}_project_share_context.json
-    └── {hash}_project_agent_xxx_actions.json
-```
-
-**跨平台**:
-- macOS/Linux: `~/mla_v3/`
-- Windows: `C:\Users\用户名\mla_v3\`
-
----
-
-## 🛠️ 常见任务
-
-### 配置新的 LLM
-
-```bash
-# 使用 OpenAI
-mla-agent --config-set base_url "https://api.openai.com/v1"
-mla-agent --config-set api_key "sk-xxx"
-mla-agent --config-set models "[gpt-4o,gpt-4o-mini]"
-
-# 使用 Claude
-mla-agent --config-set base_url "https://api.anthropic.com"
-mla-agent --config-set api_key "sk-ant-xxx"
-mla-agent --config-set models "[claude-3-7-sonnet-20250219]"
-```
-
-### 查看配置文件位置
-
-```bash
-mla-agent --config-show
-# 显示配置文件路径
-```
-
-### 清理对话历史
-
-```bash
-# 查看
-ls ~/mla_v3/conversations/
-
-# 清理特定任务
-rm ~/mla_v3/conversations/{hash}_project_*
-
-# 清理所有
-rm -rf ~/mla_v3/conversations/*
-```
-
-### 卸载
-
-```bash
-pip uninstall mla-agent
-rm -rf ~/mla_v3/  # 可选：删除用户数据
-```
-
----
-
-## 💻 VS Code 插件集成
-
-### TypeScript 示例
+### TypeScript/JavaScript Integration
 
 ```typescript
 import { spawn } from 'child_process';
 
-// 启动 Agent（JSONL 模式）
-function runAgent(workspacePath: string, userInput: string) {
-  const child = spawn('mla-agent', [
-    '--task_id', workspacePath,
-    '--user_input', userInput,
-    '--jsonl'
-  ]);
-  
-  // 解析 JSONL 事件
-  child.stdout.on('data', (data) => {
-    data.toString().split('\n').forEach(line => {
-      if (!line.trim()) return;
+interface AgentEvent {
+  type: 'start' | 'token' | 'progress' | 'result' | 'end' | 'error';
+  [key: string]: any;
+}
+
+function runAgent(
+  workspacePath: string, 
+  userInput: string,
+  onEvent: (event: AgentEvent) => void
+): Promise<AgentEvent> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('mla-agent', [
+      '--task_id', workspacePath,
+      '--user_input', userInput,
+      '--jsonl'
+    ]);
+    
+    let buffer = '';
+    
+    child.stdout.on('data', (data) => {
+      buffer += data.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
       
-      const event = JSON.parse(line);
-      
-      switch (event.type) {
-        case 'start':
-          console.log(`任务开始: ${event.task}`);
-          break;
-        case 'token':
-          console.log(event.text);
-          break;
-        case 'result':
-          console.log(`结果: ${event.summary}`);
-          break;
-        case 'end':
-          console.log(`完成 (${event.duration_ms}ms)`);
-          break;
-      }
+      lines.forEach(line => {
+        if (!line.trim()) return;
+        
+        try {
+          const event: AgentEvent = JSON.parse(line);
+          onEvent(event);
+          
+          if (event.type === 'end') {
+            resolve(event);
+          } else if (event.type === 'error') {
+            reject(new Error(event.message));
+          }
+        } catch (e) {
+          console.error('Failed to parse event:', line);
+        }
+      });
     });
+    
+    child.stderr.on('data', (data) => {
+      // Log errors to stderr
+      console.error(data.toString());
+    });
+    
+    child.on('error', reject);
   });
+}
+
+// Usage
+await runAgent('/path/to/workspace', 'Write unit tests', (event) => {
+  switch (event.type) {
+    case 'start':
+      console.log(`Task started: ${event.task}`);
+      break;
+    case 'token':
+      process.stdout.write(event.text);
+      break;
+    case 'progress':
+      updateProgressBar(event.pct);
+      break;
+    case 'result':
+      console.log(`\nResult: ${event.summary}`);
+      break;
+  }
+});
+```
+
+---
+
+### VS Code Extension Example
+
+Build your own Cursor/VS Code extension using MLA:
+
+**Extension Features:**
+- 🤖 Agent commands in command palette
+- 💬 Inline chat with workspace context
+- 📝 Automatic code generation and refactoring
+- 🔍 Literature search within editor
+- 🔔 HIL task handling with UI prompts
+
+**Basic Extension Structure:**
+
+```typescript
+// extension.ts
+import * as vscode from 'vscode';
+import { runAgent } from './mla-client';
+
+export function activate(context: vscode.ExtensionContext) {
+  let disposable = vscode.commands.registerCommand(
+    'mla.executeTask', 
+    async () => {
+      const workspace = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+      const input = await vscode.window.showInputBox({
+        prompt: 'Enter task description'
+      });
+      
+      if (!workspace || !input) return;
+      
+      // Show progress
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'MLA Agent',
+        cancellable: true
+      }, async (progress, token) => {
+        
+        await runAgent(workspace, input, (event) => {
+          if (event.type === 'token') {
+            vscode.window.showInformationMessage(event.text);
+          } else if (event.type === 'progress') {
+            progress.report({ increment: event.pct });
+          }
+        });
+      });
+    }
+  );
   
-  // 日志记录到文件
-  child.stderr.pipe(logStream);
+  context.subscriptions.push(disposable);
 }
 ```
 
----
-
-## ⚠️ 常见问题
-
-### Q: 命令未找到
-```bash
-# 验证安装
-pip list | grep mla-agent
-
-# 重新安装
-cd /path/to/MLA_V3
-pip install -e . --force-reinstall
-```
-
-### Q: 工具服务器连接失败
-```bash
-# 检查服务器
-mla-tool-server status
-
-# 如果未运行
-mla-tool-server start
-
-# 等待2秒后重试
-sleep 2 && mla-agent ...
-```
-
-### Q: API Key 未设置
-```bash
-# 错误信息: API key is required
-mla-agent --config-set api_key "YOUR_KEY"
-```
-
-### Q: 任务没有续跑
-```bash
-# 确保使用完全相同的 user_input
-mla-agent --task_id /path --user_input "完全一样的任务描述"
-
-# 或强制新任务
-mla-agent --task_id /path --user_input "新任务" --force-new
-```
+**Screenshot:** *(User will provide)*
 
 ---
 
-## 📖 进阶主题
+## 📊 Example Outputs
 
-### 使用不同 Agent
+### Academic Paper Output
 
-```bash
-# 只收集文献
-mla-agent --agent_name data_collection_agent --user_input "收集论文"
+MLA can generate complete research papers with the following structure:
 
-# 只设计实验
-mla-agent --agent_name get_idea_and_experiment_plan --user_input "设计实验"
-
-# 只编程
-mla-agent --agent_name coder_agent --user_input "实现算法"
-
-# 只生成图表
-mla-agent --agent_name data_to_figures_agent --user_input "生成图表"
-
-# 只写文档
-mla-agent --agent_name material_to_document_agent --user_input "写论文"
+```
+upload/
+├── paper.tex               # Main LaTeX document
+├── references.bib          # Bibliography
+├── figures/
+│   ├── architecture.png
+│   ├── results_comparison.png
+│   └── ablation_study.png
+└── supplementary/
+    └── detailed_results.pdf
 ```
 
-### 多任务管理
+**Quality Metrics:**
+- ✅ Passes peer review at EI/IEEE conferences
+- ✅ Proper citation formatting
+- ✅ High-quality figures (300 DPI)
+- ✅ Coherent structure and flow
 
-```bash
-# 不同项目使用不同 task_id
-mla-agent --task_id ~/project_A --user_input "任务A"
-mla-agent --task_id ~/project_B --user_input "任务B"
+### Other Capabilities
 
-# 对话历史独立存储
-ls ~/mla_v3/conversations/
-# {hashA}_project_A_*
-# {hashB}_project_B_*
-```
+**1. Scientific Computing**
+- ECM protein composition simulation
+- Logistics company shift scheduling
+- Student assignment grading with feedback
 
-### JSONL 输出处理
-
-```bash
-# 保存到文件
-mla-agent --task_id /path --user_input "任务" --jsonl > output.jsonl 2>debug.log
-
-# 实时解析
-mla-agent --task_id /path --user_input "任务" --jsonl 2>/dev/null | jq .type
-
-# 只看结果
-mla-agent --task_id /path --user_input "任务" --jsonl 2>/dev/null | jq 'select(.type=="result")'
-```
+**2. General Tasks**
+- Web scraping and data extraction
+- Code generation and debugging
+- Document conversion and processing
 
 ---
 
-## 🎯 最佳实践
+## 🎯 How It Works
 
-### 1. task_id 使用建议
+MLA's design philosophy is **"Provide short but high-value context for the next step."** To achieve this, the framework implements multiple innovations:
 
-```bash
-# ✅ 推荐：有意义的路径
---task_id ~/research/transformer_survey
---task_id ~/experiments/rl_benchmark
+### 1. 🌲 Serial Multi-Agent System
 
-# ❌ 避免：临时目录
---task_id /tmp/task  # 可能被清理
+MLA deploys agents in a **tree-structured hierarchy** (e.g., Grandparent → Parent → Child). This ensures:
+
+- ✅ **Single-purpose agents**: Each agent has a focused role
+- ✅ **Minimal tool sets**: Agents only access necessary tools
+- ✅ **Task alignment**: Serial execution prevents parallel conflicts
+- ✅ **Clear delegation**: Parent agents orchestrate child agents
+
+**Example Hierarchy:**
+```
+alpha_agent (Level 3)
+  ├── data_collection_agent (Level 2)
+  │   └── web_search_agent (Level 1)
+  ├── coder_agent (Level 2)
+  └── material_to_document_agent (Level 2)
 ```
 
-### 2. 任务描述建议
+### 2. 🎯 Nested Attention Mechanism
 
-```bash
-# ✅ 清晰具体
---user_input "收集2020-2024年关于Transformer的10篇高引论文"
+Long documents (PDFs, novels, papers) are **never directly loaded into context**. Instead:
 
-# ❌ 模糊不清
---user_input "找点论文"
+- ✅ Use `answer_from_pdf`, `answer_from_document` tools
+- ✅ Query-driven content extraction
+- ✅ Only relevant excerpts or summaries enter context
+- ✅ **Application-layer attention allocation** through tools
+
+**Traditional Approach:**
+```
+Load entire 50-page PDF → Agent processes everything → Token overflow
 ```
 
-### 3. Agent 选择建议
-
-```bash
-# 综合任务 → writing_agent（自动编排）
-mla-agent --user_input "完成一篇综述论文"
-
-# 单一功能 → 对应的 Level 2 Agent
-mla-agent --agent_name data_collection_agent --user_input "收集文献"
+**MLA Approach:**
+```
+Agent asks: "What is the methodology?"
+→ Tool extracts relevant sections (2 pages)
+→ Returns concise answer → Minimal token usage
 ```
 
-### 4. 服务器管理
+### 3. 📁 File-Centric Architecture
 
-```bash
-# 开发时：后台启动
-mla-tool-server start
+**"Files are everything."** All outputs and interactions are saved to the file system:
 
-# 调试时：前台运行（查看日志）
-mla-tool-server
+- ✅ Web scraping → Saves as Markdown files
+- ✅ PDF parsing → Extracts to structured documents
+- ✅ Sub-agent results → Stored as files
+- ✅ **No immediate returns** cluttering context
 
-# 完成后：记得停止
-mla-tool-server stop
+**Benefits:**
+- Clear audit trail
+- Reusable artifacts
+- Context-free state representation
+
+### 4. ⚡ Ten-Step Strategy (No Context Compression)
+
+A key insight: **The current file system state represents the effect of all historical actions.**
+
+- ✅ A separate **thinking module** updates file space state every 10 steps
+- ✅ Agents only retain **the last 10 actions** (since last state update)
+- ✅ **No need for context compression**
+- ✅ Historical actions are reflected in file system, not conversation history
+
+**Traditional LLM Agents:**
 ```
+Step 1: Create file A
+Step 2: Edit file B
+...
+Step 100: Context overflow → Compression needed → Information loss
+```
+
+**MLA Approach:**
+```
+Steps 1-10: Actions recorded
+Step 10: Thinking module updates "Current State: Files A, B, C exist with..."
+Steps 11-20: Only these + Current State kept
+→ No compression, no information loss
+```
+
+### 5. 🔧 Batch File Operations
+
+Inspired by [Claude Code](https://www.anthropic.com/), MLA uses **list-based tool parameters** to save tokens:
+
+- ✅ Read multiple files in one call
+- ✅ Batch operations reduce cumulative overhead
+- ✅ Significant token savings on repeated actions
+
+**Example:**
+```python
+# Traditional: 3 separate calls
+file_read(path="file1.txt")
+file_read(path="file2.txt")
+file_read(path="file3.txt")
+
+# MLA: 1 batch call
+file_read(paths=["file1.txt", "file2.txt", "file3.txt"])
+```
+
+### 6. 💾 Long-Term Memory with Task ID
+
+- ✅ **Task ID = Workspace absolute path** (not user-configurable)
+- ✅ Same task ID allows **unlimited conversation sessions**
+- ✅ Agents remember all historical tasks in the workspace
+- ✅ Persistent memory across interruptions and restarts
+
+**Usage:**
+```bash
+# First session
+mla-agent --task_id ~/research --user_input "Collect papers on Transformers"
+# → Stores conversation in ~/mla_v3/conversations/{hash}_research_*
+
+# Second session (days later)
+mla-agent --task_id ~/research --user_input "Summarize the collected papers"
+# → Agent remembers previous session and accesses collected files
+```
+
+### 7. 📊 Call Graph-Based Shared Context
+
+The `hierarchy_manager` maintains a **dynamic call relationship graph**:
+
+- ✅ Tracks parent-child agent relationships
+- ✅ Injects call graph into shared context
+- ✅ Prevents agents from overstepping boundaries
+- ✅ Maintains task alignment across multi-agent system
+
+**Call Graph Example:**
+```json
+{
+  "current_agent": "coder_agent",
+  "parent": "alpha_agent",
+  "siblings": ["data_collection_agent", "material_to_document_agent"],
+  "allowed_tools": ["python_run", "file_write", "file_read"]
+}
+```
+
+This ensures `coder_agent` won't accidentally call `web_search` (not in its scope) or interfere with sibling agents.
 
 ---
 
-## 📝 下一步
+## 📖 Documentation
 
-- [安装指南](INSTALL.md) - 安装和配置
-- [工具文档](tool_server_lite/README.md) - 19个工具的详细说明
-- [HIL API](tool_server_lite/HIL_API.md) - 人机交互集成
+- [Tool Server API Documentation](tool_server_lite/README.md) - 18 available tools
+- [Human-in-the-Loop API](tool_server_lite/HIL_API.md) - User interaction integration
+- [Configuration Examples](config/agent_library/Default/) - Agent YAML templates
 
 ---
 
-**开始使用 MLA V3 ，加速您的研究工作！** 🚀
+## 🤝 Contributing
 
+Contributions are welcome! Please feel free to submit issues or pull requests.
+
+---
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- Built with [LiteLLM](https://github.com/BerriAI/litellm) for unified LLM access
+- Uses [Crawl4AI](https://github.com/unclecode/crawl4ai) for web scraping
+
+---
+
+## 📬 Contact
+
+**Author**: Chenglin Yu  
+**Email**: yuchenglin96@qq.com/cl0415@connect.hku.hk/chenglin.yu@poly.edu.h 
+**GitHub**: [MLA V3 Repository](https://github.com/ChenglinPoly/Multi-Level-Agent)
+
+---
+
+**Start building domain-specific SOTA agents with MLA V3!** 🚀

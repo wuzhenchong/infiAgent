@@ -5,19 +5,21 @@ tools:
     level: 0
     type: tool_call_agent
     name: "file_read"
-    description: "读取指定文件的内容。可以读取整个文件或指定起始和结束行。默认返回带行号的 JSON 格式。警告：不要读取二进制文件（如 pdf,docx、图片等）。"
+    description: "读取指定文件的内容。可以读取单个或多个文件。可以读取整个文件或指定起始和结束行。默认返回带行号的 JSON 格式。警告：不要读取二进制文件（如 pdf,docx、图片等）。"
     parameters:
       type: "object"
       properties:
         path:
-          type: "string"
-          description: "文件的相对路径，例如 'data/file.txt'。只允许读取文本文件，不要读取二进制文件。"
+          type: "array"
+          items:
+            type: "string"
+          description: "文件路径数组。单个文件传 ['file.txt']，多个文件传 ['file1.txt', 'file2.txt']。只允许读取文本文件，不要读取二进制文件。"
         start_line:
           type: "integer"
-          description: "读取起始行号（从1开始），可选。"
+          description: "读取起始行号（从1开始），可选。多文件模式下应用于所有文件。"
         end_line:
           type: "integer"
-          description: "读取结束行号（包含），可选。"
+          description: "读取结束行号（包含），可选。多文件模式下应用于所有文件。"
         encoding:
           type: "string"
           description: "文件编码，可选。不指定时自动检测。"
@@ -94,8 +96,13 @@ tools:
       type: "object"
       properties:
         source:
-          type: "string"
-          description: "源文件或目录的相对路径。"
+          # type: "string"
+          # description: "源文件或目录的相对路径。"
+          # path:
+          type: "array"
+          items:
+            type: "string"
+          description: "源文件或目录的相对路径组，可以单个或多个"
         destination:
           type: "string"
           description: "目标路径。"
@@ -137,8 +144,8 @@ tools:
           description: "返回的最大结果数，默认 10。"
         save_path:
           type: "string"
-          description: "保存搜索结果的相对路径（.md 文件），可选。不指定则直接返回内容。"
-      required: ["query"]
+          description: "保存搜索结果的相对路径（.md 文件），请保存在 temp/web_search目录中。"
+      required: ["query","save_path"]
 
   google_scholar_search:
     level: 0
@@ -163,8 +170,8 @@ tools:
           description: "爬取的搜索结果页数，每页约10篇论文。"
         save_path:
           type: "string"
-          description: "保存搜索结果的相对路径（.md 文件），可选。不指定则直接返回内容。"
-      required: ["query"]
+          description: "保存搜索结果的相对路径（.md 文件)。请保存在 temp/scholar_search目录中。"
+      required: ["query","save_path"]
 
   arxiv_search:
     level: 0
@@ -193,8 +200,8 @@ tools:
           description: "排序顺序：descending（降序）、ascending（升序）。"
         save_path:
           type: "string"
-          description: "保存搜索结果的相对路径（.md 文件），可选。不指定则直接返回内容。"
-      required: ["query"]
+          description: "保存搜索结果的相对路径（.md 文件）。请保存在 temp/arxiv_search目录中。"
+      required: ["query","save_path"]
 
   crawl_page:
     level: 0
@@ -209,12 +216,12 @@ tools:
           description: "要爬取的网页完整 URL。"
         save_path:
           type: "string"
-          description: "保存 Markdown 文件的相对路径，可选。不指定则直接返回内容。"
+          description: "保存 Markdown 文件的相对路径，必选。不指定则直接返回内容。请保存在 temp/crawl_page目录中。"
         download_images:
           type: "boolean"
           default: false
           description: "是否下载图片，默认 false（移除图片）。"
-      required: ["url"]
+      required: ["url","save_path"]
 
   file_download:
     level: 0
@@ -238,7 +245,7 @@ tools:
     level: 0
     type: tool_call_agent
     name: "parse_document"
-    description: "解析文档文件并提取文本内容。支持 PDF、Word、Markdown 格式。使用 pdfplumber 高质量提取 PDF（包含表格）。"
+    description: "解析二进制文档为纯文本文件，不提供总结，分析服务。支持 PDF、Word、Markdown 格式。"
     parameters:
       type: "object"
       properties:
@@ -247,8 +254,8 @@ tools:
           description: "要解析的文档相对路径。"
         save_path:
           type: "string"
-          description: "保存解析结果的相对路径，可选。不指定则直接返回内容。"
-      required: ["path"]
+          description: "保存解析结果的相对路径。请保存在 temp/parse_document目录中。"
+      required: ["path","save_path"]
 
   vision_tool:
     level: 0
@@ -264,10 +271,26 @@ tools:
         question:
           type: "string"
           description: "要问的问题，例如'这是什么？'或'请描述图片中的内容'。不指定则默认描述图片内容。"
-        model:
-          type: "string"
-          description: "要使用的模型名称，可选。不指定则使用配置中的默认模型。"
+        # model:
+        #   type: "string"
+        #   description: "要使用的模型名称，可选。不指定则使用配置中的默认模型。"
       required: ["image_path"]
+
+  create_image:
+    level: 0
+    type: tool_call_agent
+    name: "create_image"
+    description: "根据提示词生成图片，并保存到指定路径。"
+    parameters:
+      type: "object"
+      properties:
+        prompt:
+          type: "string"
+          description: "图片的描述提示词。"
+        image_path:
+          type: "string"
+          description: "生成图片保存的相对路径（例如 'upload/generated_image.png'）。"
+      required: ["prompt", "image_path"]
 
   audio_tool:
     level: 0
@@ -362,21 +385,21 @@ tools:
 
   # ==================== 文档处理工具 ====================
 
-  parse_document:
-    level: 0
-    type: tool_call_agent
-    name: "parse_document"
-    description: "解析文档文件并提取文本内容。支持 PDF、Word、Markdown 格式。使用 pdfplumber 高质量提取 PDF（包含表格）。"
-    parameters:
-      type: "object"
-      properties:
-        path:
-          type: "string"
-          description: "要解析的文档相对路径。"
-        save_path:
-          type: "string"
-          description: "保存解析结果的相对路径，可选。不指定则直接返回内容。"
-      required: ["path"]
+  # parse_document:
+  #   level: 0
+  #   type: tool_call_agent
+  #   name: "parse_document"
+  #   description: "解析文档文件并提取文本内容。支持 PDF、Word、Markdown 格式。使用 pdfplumber 高质量提取 PDF（包含表格）。"
+  #   parameters:
+  #     type: "object"
+  #     properties:
+  #       path:
+  #         type: "string"
+  #         description: "要解析的文档相对路径。"
+  #       save_path:
+  #         type: "string"
+  #         description: "保存解析结果的相对路径，可选。不指定则直接返回内容。"
+  #     required: ["path"]
 
   md_to_pdf:
     level: 0
@@ -421,7 +444,7 @@ tools:
     level: 0
     type: tool_call_agent
     name: "human_in_loop"
-    description: "创建人类任务并等待完成。用于需要人工干预的场景（如上传文件、确认结果等）。异步挂起，不阻塞服务器。"
+    description: "创建人类任务并等待完成。用于需要人工干预的场景（如上传文件、确认结果等）或者和用户进行交互。异步挂起，不阻塞服务器。"
     parameters:
       type: "object"
       properties:
@@ -431,9 +454,9 @@ tools:
         instruction:
           type: "string"
           description: "给人类的任务指令描述。"
-        timeout:
-          type: "integer"
-          description: "超时时间（秒），不指定则无限等待。请都选择无限等待。"
+        # timeout:
+        #   type: "integer"
+        #   description: "超时时间（秒），不指定则无限等待。请都选择无限等待。"
       required: ["hil_id", "instruction"]
 
   # ==================== 代码执行工具 ====================
@@ -493,7 +516,7 @@ tools:
     level: 0
     type: tool_call_agent
     name: "execute_command"
-    description: "执行任意命令行命令。可以指定工作目录。"
+    description: "执行制定命令行命令（只允许 grep,pwd等只读指令）。可以指定工作目录。"
     parameters:
       type: "object"
       properties:

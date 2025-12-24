@@ -168,12 +168,18 @@ class ContextBuilder:
         if not history:
             return "(无历史交互)"
         
+
+        
         compressed_history = current.get("_compressed_user_agent_history")
         if compressed_history:
-            safe_print("✅ 使用已有的压缩历史交互")
+            safe_print("使用已有的压缩历史交互")
             return compressed_history
         
-        safe_print("🔄 首次压缩历史交互...")
+        safe_print("未到历史交互压缩阈值")
+        if len(str(history)) < 5000:
+            return str(history)
+        
+        safe_print("首次压缩历史交互...")
         compressed_result = self._compress_user_agent_history_with_llm(history, task_id)
         
         context["current"]["_compressed_user_agent_history"] = compressed_result

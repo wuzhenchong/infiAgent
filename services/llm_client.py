@@ -66,10 +66,20 @@ class SimpleLLMClient:
         # 读取配置
         self.base_url = self.config.get("base_url", "")
         self.api_key = self.config.get("api_key", "")
-        self.models = self.config.get("models", [])
         self.temperature = self.config.get("temperature", 0)
         self.max_tokens = self.config.get("max_tokens", 0)
         self.max_context_window = self.config.get("max_context_window", 100000)  # 上下文窗口限制
+        
+        # 解析模型配置（支持两种格式）
+        self.models = []  # 模型名称列表
+        self.figure_models = []
+        self.compressor_models = []
+        self.model_configs = {}  # 模型名称 -> 配置字典
+        
+        self._parse_models_config(self.config.get("models", []), self.models)
+        self._parse_models_config(self.config.get("figure_models", []), self.figure_models)
+        self._parse_models_config(self.config.get("compressor_models", []), self.compressor_models)
+
         
         if not self.api_key:
             raise ValueError("未配置API密钥")
@@ -90,8 +100,42 @@ class SimpleLLMClient:
         safe_print(f"✅ LLM客户端初始化成功（LiteLLM）")
         safe_print(f"   Base URL: {self.base_url}")
         safe_print(f"   可用模型: {len(self.models)} 个")
+        safe_print(f"   Figure模型: {len(self.figure_models)} 个")
+        safe_print(f"   Compressor模型: {len(self.compressor_models)} 个")
         safe_print(f"   默认Temperature: {self.temperature}")
         safe_print(f"   默认Max Tokens: {self.max_tokens}")
+    
+    def _parse_models_config(self, models_config: List, target_list: List):
+        """
+        解析模型配置，支持两种格式：
+        1. 字符串格式：直接是模型名称
+        2. 对象格式：包含 name 和额外参数
+        
+        Args:
+            models_config: 原始模型配置列表
+            target_list: 目标列表（self.models, self.figure_models 等）
+        """
+        for model_item in models_config:
+            if isinstance(model_item, str):
+                # 简单格式：直接是模型名称
+                target_list.append(model_item)
+                self.model_configs[model_item] = {}
+            elif isinstance(model_item, dict):
+                # 对象格式：包含额外参数
+                model_name = model_item.get("name")
+                if not model_name:
+                    safe_print(f"⚠️ 模型配置缺少 'name' 字段，跳过: {model_item}")
+                    continue
+                
+                target_list.append(model_name)
+                # 保存除 name 外的所有参数
+                extra_params = {k: v for k, v in model_item.items() if k != "name"}
+                self.model_configs[model_name] = extra_params
+                
+                if extra_params:
+                    safe_print(f"   📝 模型 {model_name} 配置了额外参数: {list(extra_params.keys())}")
+            else:
+                safe_print(f"⚠️ 不支持的模型配置格式，跳过: {model_item}")
     
     def chat(
         self,
@@ -152,6 +196,27 @@ class SimpleLLMClient:
                     kwargs["tool_choice"] = "required"
                 # 禁用并行工具调用（每次只调用一个工具）
                 kwargs["parallel_tool_calls"] = False
+            
+            # 添加模型特定的额外参数
+            model_extra_params = self.model_configs.get(model, {})
+            if model_extra_params:
+                # 处理 provider 参数（OpenRouter 特定）
+                if "provider" in model_extra_params:
+                    if "extra_body" not in kwargs:
+                        kwargs["extra_body"] = {}
+                    kwargs["extra_body"]["provider"] = model_extra_params["provider"]
+                
+                # 处理 extra_headers
+                if "extra_headers" in model_extra_params:
+                    kwargs["extra_headers"] = model_extra_params["extra_headers"]
+                
+                # 处理 extra_body（合并到已有的 extra_body）
+                if "extra_body" in model_extra_params:
+                    if "extra_body" not in kwargs:
+                        kwargs["extra_body"] = {}
+                    kwargs["extra_body"].update(model_extra_params["extra_body"])
+                
+                safe_print(f"   ⚙️  应用模型额外参数: {list(model_extra_params.keys())}")
             
             # 使用LiteLLM调用
             # 添加调试信息

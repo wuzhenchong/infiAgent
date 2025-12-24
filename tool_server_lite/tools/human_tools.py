@@ -12,6 +12,9 @@ from .file_tools import BaseTool
 # 全局 HIL 任务状态存储
 HIL_TASKS = {}
 
+# 全局工具确认请求存储（与 HIL 分开）
+TOOL_CONFIRMATIONS = {}
+
 
 class HumanInLoopTool(BaseTool):
     """人类交互工具 - 挂起等待人类完成任务（异步，不阻塞服务器）"""
@@ -76,18 +79,7 @@ class HumanInLoopTool(BaseTool):
                     del HIL_TASKS[hil_id]
                     return {
                         "status": "success",
-                        "output": f"人类任务已完成: {result}",
-                        "error": ""
-                    }
-                
-                # 检查是否取消
-                if task and task["status"] == "cancelled":
-                    reason = task.get("result", "用户取消操作")
-                    # 清理任务
-                    del HIL_TASKS[hil_id]
-                    return {
-                        "status": "success",
-                        "output": f"用户取消操作: {reason}",
+                        "output": f": 用户回复：{result}",
                         "error": ""
                     }
                 
@@ -123,8 +115,8 @@ def get_hil_status(hil_id: str) -> Dict[str, Any]:
     }
 
 
-def complete_hil_task(hil_id: str, result: str = "完成") -> Dict[str, Any]:
-    """完成 HIL 任务"""
+def respond_hil_task(hil_id: str, response: str) -> Dict[str, Any]:
+    """响应 HIL 任务（用户可以回复任何内容）"""
     task = HIL_TASKS.get(hil_id)
     if not task:
         return {
@@ -132,32 +124,13 @@ def complete_hil_task(hil_id: str, result: str = "完成") -> Dict[str, Any]:
             "error": f"HIL task not found: {hil_id}"
         }
     
-    # 标记为完成
+    # 标记为完成，并保存用户响应
     HIL_TASKS[hil_id]["status"] = "completed"
-    HIL_TASKS[hil_id]["result"] = result
+    HIL_TASKS[hil_id]["result"] = response
     
     return {
         "success": True,
-        "message": f"HIL task {hil_id} marked as completed"
-    }
-
-
-def cancel_hil_task(hil_id: str, reason: str = "用户取消") -> Dict[str, Any]:
-    """取消 HIL 任务"""
-    task = HIL_TASKS.get(hil_id)
-    if not task:
-        return {
-            "success": False,
-            "error": f"HIL task not found: {hil_id}"
-        }
-    
-    # 标记为取消
-    HIL_TASKS[hil_id]["status"] = "cancelled"
-    HIL_TASKS[hil_id]["result"] = reason
-    
-    return {
-        "success": True,
-        "message": f"HIL task {hil_id} marked as cancelled"
+        "message": f"HIL task {hil_id} responded with: {response[:100]}"
     }
 
 
@@ -175,5 +148,112 @@ def list_hil_tasks() -> Dict[str, Any]:
     return {
         "total": len(tasks),
         "tasks": tasks
+    }
+
+
+def get_hil_task_for_workspace(task_id: str) -> Dict[str, Any]:
+    """获取指定 workspace 的 HIL 任务（如果有）"""
+    for hil_id, task in HIL_TASKS.items():
+        if task["task_id"] == task_id and task["status"] == "waiting":
+            return {
+                "found": True,
+                "hil_id": hil_id,
+                "instruction": task["instruction"],
+                "task_id": task["task_id"]
+            }
+    
+    return {
+        "found": False
+    }
+
+
+# ========== 工具确认相关函数 ==========
+
+def create_tool_confirmation(confirm_id: str, task_id: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """创建工具确认请求"""
+    TOOL_CONFIRMATIONS[confirm_id] = {
+        "status": "waiting",
+        "task_id": task_id,
+        "tool_name": tool_name,
+        "arguments": arguments,
+        "result": None  # "approved" or "rejected"
+    }
+    
+    return {
+        "success": True,
+        "message": f"Tool confirmation created: {confirm_id}"
+    }
+
+
+def get_tool_confirmation_status(confirm_id: str) -> Dict[str, Any]:
+    """获取工具确认状态"""
+    confirmation = TOOL_CONFIRMATIONS.get(confirm_id)
+    if not confirmation:
+        return {
+            "found": False,
+            "error": f"Tool confirmation not found: {confirm_id}"
+        }
+    
+    return {
+        "found": True,
+        "confirm_id": confirm_id,
+        "status": confirmation["status"],
+        "tool_name": confirmation["tool_name"],
+        "arguments": confirmation["arguments"],
+        "task_id": confirmation["task_id"],
+        "result": confirmation.get("result")
+    }
+
+
+def respond_tool_confirmation(confirm_id: str, approved: bool) -> Dict[str, Any]:
+    """响应工具确认请求"""
+    confirmation = TOOL_CONFIRMATIONS.get(confirm_id)
+    if not confirmation:
+        return {
+            "success": False,
+            "error": f"Tool confirmation not found: {confirm_id}"
+        }
+    
+    # 标记为完成
+    TOOL_CONFIRMATIONS[confirm_id]["status"] = "completed"
+    TOOL_CONFIRMATIONS[confirm_id]["result"] = "approved" if approved else "rejected"
+    
+    return {
+        "success": True,
+        "message": f"Tool confirmation {confirm_id}: {'approved' if approved else 'rejected'}"
+    }
+
+
+def get_tool_confirmation_for_workspace(task_id: str) -> Dict[str, Any]:
+    """获取指定 workspace 的工具确认请求（如果有）"""
+    for confirm_id, confirmation in TOOL_CONFIRMATIONS.items():
+        if confirmation["task_id"] == task_id and confirmation["status"] == "waiting":
+            return {
+                "found": True,
+                "confirm_id": confirm_id,
+                "tool_name": confirmation["tool_name"],
+                "arguments": confirmation["arguments"],
+                "task_id": confirmation["task_id"]
+            }
+    
+    return {
+        "found": False
+    }
+
+
+def list_tool_confirmations() -> Dict[str, Any]:
+    """列出所有工具确认请求"""
+    confirmations = []
+    for confirm_id, confirmation in TOOL_CONFIRMATIONS.items():
+        confirmations.append({
+            "confirm_id": confirm_id,
+            "status": confirmation["status"],
+            "tool_name": confirmation["tool_name"],
+            "task_id": confirmation["task_id"]
+        })
+    
+    return {
+        "total": len(confirmations),
+        "confirmations": confirmations
     }
 

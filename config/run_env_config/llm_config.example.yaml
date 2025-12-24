@@ -1,0 +1,101 @@
+# LLM 配置文件示例
+# 
+# 本文件展示了所有可用的配置选项
+
+# 全局配置
+temperature: 0  # 温度参数，0表示确定性输出
+max_tokens: 0  # 最大生成 token 数，0表示不限制
+max_context_window: 100000  # 上下文窗口限制
+
+# API 配置
+base_url: https://openrouter.ai/api/v1  # API 基础 URL
+api_key: your-api-key-here  # API 密钥
+
+# 模型配置
+# 支持两种格式：
+# 1. 简单格式（字符串）：直接指定模型名称
+# 2. 对象格式：指定模型名称和额外参数
+
+models:
+  # ===== 简单格式示例 =====
+  # 只指定模型名称，使用默认配置
+  - openai/deepseek/deepseek-v3.2
+  - openai/google/gemini-2.5-flash
+  
+  # ===== 对象格式示例 =====
+  
+  # 示例1: OpenRouter 指定 provider
+  # OpenRouter 支持通过 provider 参数指定使用哪个提供商
+  - name: anthropic/claude-3.5-sonnet
+    provider:
+      order: ["Anthropic"]  # 优先使用 Anthropic 官方
+      # 可用的 provider: "Anthropic", "AWS Bedrock", "Google Vertex AI" 等
+  
+  # 示例2: 添加自定义 HTTP headers
+  - name: openai/gpt-4
+    extra_headers:
+      HTTP-Referer: "https://your-site.com"
+      X-Title: "Your App Name"
+  
+  # 示例3: 添加额外的请求参数（extra_body）
+  - name: openai/deepseek/deepseek-v3
+    extra_body:
+      custom_param: "value"
+      another_param: 123
+  
+  # 示例4: 组合使用多个额外参数
+  - name: google/gemini-pro
+    provider:
+      order: ["Google AI Studio", "Vertex AI"]
+      allow_fallbacks: true
+    extra_headers:
+      HTTP-Referer: "https://your-site.com"
+    extra_body:
+      safety_settings:
+        - category: "HARM_CATEGORY_HARASSMENT"
+          threshold: "BLOCK_NONE"
+  
+  # ===== OpenRouter 特定配置示例 =====
+  
+  # DeepSeek 通过 DeepSeek 官方提供商
+  - name: openai/deepseek/deepseek-v3.2
+    provider:
+      order: ["DeepSeek"]
+      require_parameters: false
+  
+  # Claude 通过 Anthropic 官方
+  - name: anthropic/claude-3-opus
+    provider:
+      order: ["Anthropic"]
+      data_collection: "deny"  # 拒绝数据收集
+  
+  # Gemini 指定多个备选提供商
+  - name: google/gemini-2.0-flash
+    provider:
+      order: ["Google AI Studio", "Vertex AI", "OpenRouter"]
+      allow_fallbacks: true
+
+# ===== 说明 =====
+# 
+# 1. provider 参数（OpenRouter 专用）:
+#    - order: 提供商优先级列表
+#    - allow_fallbacks: 是否允许回退到其他提供商
+#    - require_parameters: 是否要求完整参数
+#    - data_collection: "allow" 或 "deny"
+#
+# 2. extra_headers:
+#    - 添加自定义 HTTP 请求头
+#    - OpenRouter 推荐设置 HTTP-Referer 和 X-Title
+#
+# 3. extra_body:
+#    - 添加到请求 body 的额外参数
+#    - 支持模型特定的自定义参数
+#
+# 4. 混合使用:
+#    - 可以同时使用简单格式和对象格式
+#    - 同一个模型可以配置多次（不同参数）
+#
+# 5. LiteLLM 兼容性:
+#    - 所有参数都通过 LiteLLM 传递给底层 API
+#    - 不支持的参数会被自动忽略（drop_params=True）
+

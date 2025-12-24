@@ -21,9 +21,10 @@ if sys.platform == 'win32':
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import uvicorn
 from pathlib import Path
+from urllib.parse import urlparse
 
 # 添加父目录到路径
 sys.path.insert(0, str(Path(__file__).parent))
@@ -42,6 +43,7 @@ from tools import (
     FileDownloadTool,
     ParseDocumentTool,
     VisionTool,
+    CreateImageTool,
     AudioTool,
     PaperAnalyzeTool,
     MarkdownToPdfTool,
@@ -52,7 +54,11 @@ from tools import (
     PipInstallTool,
     ExecuteCommandTool
 )
-from tools.human_tools import get_hil_status, complete_hil_task, cancel_hil_task, list_hil_tasks
+from tools.human_tools import (
+    get_hil_status, respond_hil_task, list_hil_tasks, get_hil_task_for_workspace,
+    create_tool_confirmation, get_tool_confirmation_status, respond_tool_confirmation,
+    get_tool_confirmation_for_workspace, list_tool_confirmations
+)
 
 app = FastAPI(
     title="Tool Server Lite",
@@ -75,6 +81,7 @@ TOOLS = {
     "file_download": FileDownloadTool(),
     "parse_document": ParseDocumentTool(),
     "vision_tool": VisionTool(),
+    "create_image": CreateImageTool(),
     "audio_tool": AudioTool(),
     "paper_analyze_tool": PaperAnalyzeTool(),
     "md_to_pdf": MarkdownToPdfTool(),
@@ -324,33 +331,130 @@ async def get_hil_task(hil_id: str):
     return get_hil_status(hil_id)
 
 
-class HilCompleteRequest(BaseModel):
-    """HIL完成请求"""
-    result: str = "完成"
+class HilRespondRequest(BaseModel):
+    """HIL响应请求"""
+    response: str
 
 
-@app.post("/api/hil/complete/{hil_id}")
-async def complete_hil(hil_id: str, request: HilCompleteRequest = None):
-    """完成 HIL 任务"""
-    result = request.result if request else "完成"
-    return complete_hil_task(hil_id, result)
+@app.post("/api/hil/respond/{hil_id}")
+async def respond_hil(hil_id: str, request: HilRespondRequest):
+    """响应 HIL 任务（用户可以回复任何内容）"""
+    return respond_hil_task(hil_id, request.response)
 
 
-class HilCancelRequest(BaseModel):
-    """HIL取消请求"""
-    reason: str = "用户取消"
+@app.get("/api/hil/workspace/{task_id:path}")
+async def get_workspace_hil(task_id: str):
+    """获取指定 workspace 的 HIL 任务"""
+    return get_hil_task_for_workspace(task_id)
 
 
-@app.post("/api/hil/cancel/{hil_id}")
-async def cancel_hil(hil_id: str, request: HilCancelRequest = None):
-    """取消 HIL 任务"""
-    reason = request.reason if request else "用户取消"
-    return cancel_hil_task(hil_id, reason)
+# ===== 工具确认 API =====
+
+class ToolConfirmationCreateRequest(BaseModel):
+    """工具确认创建请求"""
+    confirm_id: str
+    task_id: str
+    tool_name: str
+    arguments: Dict[str, Any]
 
 
-def start_server(host: str = "0.0.0.0", port: int = 8001):
+@app.post("/api/tool-confirmation/create")
+async def create_confirmation(request: ToolConfirmationCreateRequest):
+    """创建工具确认请求"""
+    return create_tool_confirmation(
+        request.confirm_id,
+        request.task_id,
+        request.tool_name,
+        request.arguments
+    )
+
+
+@app.get("/api/tool-confirmation/{confirm_id}")
+async def get_confirmation(confirm_id: str):
+    """获取工具确认状态"""
+    return get_tool_confirmation_status(confirm_id)
+
+
+class ToolConfirmationRespondRequest(BaseModel):
+    """工具确认响应请求"""
+    approved: bool
+
+
+@app.post("/api/tool-confirmation/respond/{confirm_id}")
+async def respond_confirmation(confirm_id: str, request: ToolConfirmationRespondRequest):
+    """响应工具确认请求"""
+    return respond_tool_confirmation(confirm_id, request.approved)
+
+
+@app.get("/api/tool-confirmation/workspace/{task_id:path}")
+async def get_workspace_confirmation(task_id: str):
+    """获取指定 workspace 的工具确认请求"""
+    return get_tool_confirmation_for_workspace(task_id)
+
+
+@app.get("/api/tool-confirmation/list")
+async def get_all_confirmations():
+    """列出所有工具确认请求"""
+    return list_tool_confirmations()
+
+
+def load_server_config() -> Tuple[str, int]:
+    """
+    从配置文件加载服务器地址和端口
+    
+    Returns:
+        (host, port) 元组，失败时返回默认值 ("0.0.0.0", 8001)
+    """
+    try:
+        import yaml
+        config_path = Path(__file__).parent.parent / "config" / "run_env_config" / "tool_config.yaml"
+        
+        if not config_path.exists():
+            # 配置文件不存在，静默使用默认值
+            return "0.0.0.0", 8001
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        tools_server = config.get('tools_server', 'http://0.0.0.0:8001/')
+        
+        # 解析 URL
+        parsed = urlparse(tools_server)
+        
+        # 提取 host（默认 0.0.0.0）
+        host = parsed.hostname or "0.0.0.0"
+        
+        # 如果是 localhost 或 127.0.0.1，启动时使用 0.0.0.0 以监听所有接口
+        # 这样既可以本地访问，也可以远程访问
+        if host in ['localhost', '127.0.0.1']:
+            host = "0.0.0.0"
+        
+        # 提取 port（默认 8001）
+        port = parsed.port or 8001
+        
+        return host, port
+    
+    except Exception:
+        # 配置文件读取失败，静默使用默认值
+        return "0.0.0.0", 8001
+
+
+def start_server(host: str = None, port: int = None):
     """启动服务器"""
+    # 如果没有指定，从配置文件读取
+    used_config = False
+    if host is None or port is None:
+        config_host, config_port = load_server_config()
+        if host is None:
+            host = config_host
+            used_config = True
+        if port is None:
+            port = config_port
+            used_config = True
+    
     print(f"🚀 Starting Tool Server Lite on {host}:{port}")
+    if used_config:
+        print(f"📋 使用配置文件: config/run_env_config/tool_config.yaml")
     print(f"📚 Available tools: {len(TOOLS)}")
     print(f"🔗 API Docs: http://{host}:{port}/docs")
     
@@ -469,10 +573,25 @@ def server_stop():
         print(f"❌ 停止失败: {e}")
 
 
-def server_start_daemon(host="0.0.0.0", port=8001):
+def server_start_daemon(host=None, port=None):
     """后台启动服务器"""
     import subprocess
     import sys
+    
+    # 如果没有指定，从配置文件读取
+    used_config = False
+    if host is None or port is None:
+        config_host, config_port = load_server_config()
+        if host is None:
+            host = config_host
+            used_config = True
+        if port is None:
+            port = config_port
+            used_config = True
+    
+    if used_config:
+        print(f"📋 使用配置文件: config/run_env_config/tool_config.yaml")
+        print(f"📍 服务器地址: {host}:{port}")
     
     if server_status():
         print("ℹ️  服务器已在运行")
@@ -542,11 +661,14 @@ def main():
     """命令行入口"""
     import argparse
     
+    # 从配置文件加载默认值
+    default_host, default_port = load_server_config()
+    
     parser = argparse.ArgumentParser(description="Tool Server Lite - 服务管理")
     parser.add_argument("command", nargs='?', default=None,
                        help="服务管理命令: start, stop, status, restart（不指定则前台运行）")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
-    parser.add_argument("--port", default=8001, type=int, help="Port to bind")
+    parser.add_argument("--host", default=default_host, help=f"Host to bind (默认从配置文件读取: {default_host})")
+    parser.add_argument("--port", default=default_port, type=int, help=f"Port to bind (默认从配置文件读取: {default_port})")
     
     args = parser.parse_args()
     

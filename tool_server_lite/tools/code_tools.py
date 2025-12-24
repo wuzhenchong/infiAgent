@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple
 import subprocess
 import sys
+import re
 from .file_tools import BaseTool, get_abs_path
 
 #def _create_venv(self, venv_path: Path) -> Tuple[bool, str]:重复两遍要记得同时维护。
@@ -31,8 +32,8 @@ class ExecuteCodeTool(BaseTool):
         import os
         venv_path.parent.mkdir(parents=True, exist_ok=True)
         
-        print(f"[DEBUG] 开始创建虚拟环境: {venv_path}")
-        print(f"[DEBUG] Python 解释器: {sys.executable}")
+        #print(f"[DEBUG] 开始创建虚拟环境: {venv_path}")
+        #print(f"[DEBUG] Python 解释器: {sys.executable}")
         
         def _run_cmd(cmd):
             """运行命令并返回 (成功?, 错误信息)"""
@@ -49,7 +50,7 @@ class ExecuteCodeTool(BaseTool):
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
-                timeout=180,  # 增加超时时间
+                timeout=300,  # 增加超时时间
                 env=env,
                 close_fds=close_fds
             )
@@ -391,14 +392,108 @@ class PipInstallTool(BaseTool):
 
 
 class ExecuteCommandTool(BaseTool):
-    """命令行执行工具"""
+    """命令行执行工具（仅限安全的只读命令）"""
+    
+    # 白名单：只允许安全的只读命令
+    ALLOWED_COMMANDS = {
+        # 文件查看和搜索
+        'ls', 'dir',           # 列出目录内容
+        'cat', 'type',         # 显示文件内容
+        'head', 'tail',        # 显示文件开头/结尾
+        'grep', 'findstr',     # 文本搜索
+        'find', 'where',       # 查找文件
+        'tree',                # 显示目录树
+        
+        # 系统信息
+        'pwd', 'cd',           # 显示/切换目录（cd仅用于显示）
+        'whoami',              # 当前用户
+        'hostname',            # 主机名
+        'date',                # 日期时间
+        'echo',                # 输出文本
+        
+        # 文件信息
+        'wc',                  # 统计行数/字数
+        'diff',                # 比较文件
+        'file',                # 文件类型
+        'stat',                # 文件状态
+        'du',                  # 磁盘使用
+        'df',                  # 磁盘空间
+        
+        # 其他只读命令
+        'which',               # 查找命令路径
+        'env', 'set',          # 显示环境变量
+        'python', 'python3',   # Python解释器（用于查看版本等）
+        'pip',                 # pip命令（仅限list/show等）
+        'git',                 # git命令（仅限status/log等）
+    }
+    
+    # 危险参数黑名单（即使命令在白名单中，如果包含这些参数也拒绝）
+    DANGEROUS_PATTERNS = [
+        'rm ', 'del ',         # 删除
+        'mv ', 'move ',        # 移动/重命名
+        'cp ', 'copy ',        # 复制
+        'chmod', 'chown',      # 修改权限
+        '>', '>>',             # 重定向（可能覆盖文件）
+        'sudo', 'su',          # 提权
+        'format', 'mkfs',      # 格式化
+        'kill', 'pkill',       # 结束进程
+        '--force', '-f',       # 强制操作
+        'install', 'uninstall', # 安装/卸载
+    ]
+    
+    def _is_command_safe(self, command: str) -> tuple[bool, str]:
+        """
+        检查命令是否安全
+        
+        Returns:
+            (是否安全, 错误信息)
+        """
+        command = command.strip()
+        
+        if not command:
+            return False, "空命令"
+        
+        # 提取命令的第一个词（命令名）
+        cmd_parts = command.split()
+        if not cmd_parts:
+            return False, "无效命令"
+        
+        base_command = cmd_parts[0]
+        
+        # Windows下可能带.exe后缀
+        if base_command.endswith('.exe'):
+            base_command = base_command[:-4]
+        
+        # 检查基础命令是否在白名单中
+        if base_command not in self.ALLOWED_COMMANDS:
+            return False, f"命令 '{base_command}' 不在允许列表中。仅允许只读命令如: ls, cat, grep, find, pwd, tree 等"
+        
+        # 检查是否包含危险模式
+        command_lower = command.lower()
+        for pattern in self.DANGEROUS_PATTERNS:
+            if pattern in command_lower:
+                return False, f"命令包含危险操作 '{pattern}'，已被拒绝"
+        
+        # git 命令特殊检查：只允许只读操作
+        if base_command == 'git':
+            git_readonly_cmds = ['status', 'log', 'diff', 'show', 'branch', 'remote', 'config', '--version']
+            if len(cmd_parts) < 2 or not any(ro_cmd in command_lower for ro_cmd in git_readonly_cmds):
+                return False, "git 命令仅允许只读操作（如 status, log, diff, show 等）"
+        
+        # pip 命令特殊检查：只允许只读操作
+        if base_command in ['pip', 'pip3']:
+            pip_readonly_cmds = ['list', 'show', 'search', 'freeze', '--version', '-V']
+            if len(cmd_parts) < 2 or not any(ro_cmd in command for ro_cmd in pip_readonly_cmds):
+                return False, "pip 命令仅允许只读操作（如 list, show, freeze 等）"
+        
+        return True, ""
     
     def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行命令行命令
+        执行安全的只读命令
         
         Parameters:
-            command (str): 要执行的命令
+            command (str): 要执行的命令（仅限白名单中的安全命令）
             working_dir (str, optional): 工作目录相对路径，默认为workspace根目录
             timeout (int, optional): 超时时间（秒），默认30
         """
@@ -407,7 +502,34 @@ class ExecuteCommandTool(BaseTool):
             working_dir = parameters.get("working_dir", ".")
             timeout = parameters.get("timeout", 30)
             
+            if not command:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": "command parameter is required"
+                }
+            
+            # 安全检查
+            is_safe, error_msg = self._is_command_safe(command)
+            if not is_safe:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": f"命令安全检查失败: {error_msg}"
+                }
+            
             abs_working_dir = get_abs_path(task_id, working_dir)
+            
+            # 确保工作目录在 workspace 内
+            workspace = Path(task_id)
+            try:
+                abs_working_dir.resolve().relative_to(workspace.resolve())
+            except ValueError:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": f"工作目录必须在 workspace 内: {working_dir}"
+                }
             
             if not abs_working_dir.exists():
                 return {
@@ -444,6 +566,172 @@ class ExecuteCommandTool(BaseTool):
                 "output": "",
                 "error": f"Command timeout ({timeout}s)"
             }
+        except Exception as e:
+            return {
+                "status": "error",
+                "output": "",
+                "error": str(e)
+            }
+
+
+class GrepTool(BaseTool):
+    """文本搜索工具（跨平台grep实现）"""
+    
+    def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        在文件中搜索匹配的文本模式（跨平台实现）
+        
+        Parameters:
+            pattern (str): 要搜索的正则表达式模式
+            search_path (str, optional): 搜索路径相对路径，默认为当前工作区根目录
+            file_pattern (str, optional): 文件名匹配模式（支持通配符），如 "*.py", "*.txt"
+            recursive (bool, optional): 是否递归搜索子目录，默认True
+            case_sensitive (bool, optional): 是否大小写敏感，默认True
+            show_line_number (bool, optional): 是否显示行号，默认True
+            max_results (int, optional): 最大结果数量，默认100
+            context_lines (int, optional): 显示匹配行前后的上下文行数，默认0
+        """
+        try:
+            pattern = parameters.get("pattern")
+            if not pattern:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": "pattern is required"
+                }
+            
+            search_path = parameters.get("search_path", ".")
+            file_pattern = parameters.get("file_pattern", "*")
+            recursive = parameters.get("recursive", True)
+            case_sensitive = parameters.get("case_sensitive", True)
+            show_line_number = parameters.get("show_line_number", True)
+            max_results = parameters.get("max_results", 100)
+            context_lines = parameters.get("context_lines", 0)
+            
+            # 获取绝对路径，确保只在 workspace 内搜索
+            abs_search_path = get_abs_path(task_id, search_path)
+            workspace = Path(task_id)
+            
+            # 安全检查：确保搜索路径在 workspace 内
+            try:
+                abs_search_path.resolve().relative_to(workspace.resolve())
+            except ValueError:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": f"Search path must be within workspace: {search_path}"
+                }
+            
+            if not abs_search_path.exists():
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": f"Search path not found: {search_path}"
+                }
+            
+            # 编译正则表达式
+            flags = 0 if case_sensitive else re.IGNORECASE
+            try:
+                regex = re.compile(pattern, flags)
+            except re.error as e:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": f"Invalid regex pattern: {str(e)}"
+                }
+            
+            # 执行搜索
+            results = []
+            total_matches = 0
+            files_searched = 0
+            
+            # 获取要搜索的文件列表
+            if abs_search_path.is_file():
+                files_to_search = [abs_search_path]
+            else:
+                if recursive:
+                    files_to_search = list(abs_search_path.rglob(file_pattern))
+                else:
+                    files_to_search = list(abs_search_path.glob(file_pattern))
+                
+                # 只保留文件（排除目录）
+                files_to_search = [f for f in files_to_search if f.is_file()]
+            
+            # 搜索每个文件
+            for file_path in files_to_search:
+                if total_matches >= max_results:
+                    break
+                
+                try:
+                    # 尝试读取文件（跳过二进制文件）
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                    
+                    files_searched += 1
+                    matches_in_file = []
+                    
+                    for line_num, line in enumerate(lines, 1):
+                        if total_matches >= max_results:
+                            break
+                        
+                        if regex.search(line):
+                            total_matches += 1
+                            
+                            # 计算相对路径（相对于 workspace）
+                            try:
+                                relative_path = file_path.relative_to(workspace)
+                            except ValueError:
+                                relative_path = file_path
+                            
+                            # 构建输出行
+                            if show_line_number:
+                                match_line = f"{relative_path}:{line_num}: {line.rstrip()}"
+                            else:
+                                match_line = f"{relative_path}: {line.rstrip()}"
+                            
+                            # 添加上下文行
+                            if context_lines > 0:
+                                context = []
+                                # 前面的行
+                                for i in range(max(0, line_num - context_lines - 1), line_num - 1):
+                                    context.append(f"{relative_path}:{i+1}- {lines[i].rstrip()}")
+                                
+                                context.append(match_line)
+                                
+                                # 后面的行
+                                for i in range(line_num, min(len(lines), line_num + context_lines)):
+                                    context.append(f"{relative_path}:{i+1}- {lines[i].rstrip()}")
+                                
+                                matches_in_file.append("\n".join(context))
+                            else:
+                                matches_in_file.append(match_line)
+                    
+                    if matches_in_file:
+                        results.extend(matches_in_file)
+                
+                except (UnicodeDecodeError, PermissionError):
+                    # 跳过无法读取的文件（二进制文件或权限问题）
+                    continue
+                except Exception:
+                    # 跳过其他错误的文件
+                    continue
+            
+            # 构建输出
+            if results:
+                output = "\n".join(results)
+                summary = f"\n\n搜索完成: 在 {files_searched} 个文件中找到 {total_matches} 处匹配"
+                if total_matches >= max_results:
+                    summary += f" (已达到最大结果数 {max_results})"
+                output += summary
+            else:
+                output = f"未找到匹配项。已搜索 {files_searched} 个文件。"
+            
+            return {
+                "status": "success",
+                "output": output,
+                "error": ""
+            }
+            
         except Exception as e:
             return {
                 "status": "error",
