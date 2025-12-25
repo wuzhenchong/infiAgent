@@ -834,9 +834,12 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 📬 Contact
 
-**Author**: @yuchenglin  
-**Thanks to Contributors**： @wangyuchen @wangsongmiao @yuyang
+**Author**: @yuchenglin
+
+**Thanks to Contributors**： @wangyuchen @wangsongmiao @yuyang @lijinjia
+
 **Email**: yuchenglin96@qq.com/cl0415@connect.hku.hk/chenglin.yu@poly.edu.h 
-**GitHub**: [MLA V3 Repository](https://github.com/ChenglinPoly/Multi-Level-Agent)
+
+**GitHub**: [MLA V3 Repository](https://github.com/ChenglinPoly/infiAgent)
 
 ---
