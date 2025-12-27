@@ -571,8 +571,7 @@ tools:
       - web_search
       - google_scholar_search
       - crawl_page
-      - summary_from_one_paper
-      - get_searchPdf_by_doi_or_title
+      - answer_from_papers
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
     prompts:
@@ -582,7 +581,7 @@ tools:
         详细分析用户的意图，并根据意图编排使用你的工具完成任务。
         例如，如果用户想要进行学术论文写作，则你应该参考下面的流程：
         **参考流程:**
-        **重要！！**不要不基于已有材料乱编，特别是参考文献，应该使用阅读 parse_document  或者 google_scholar_search 工具来获取参考文献。文章作者应该真实！！abstract，introduction，conclusion 部分一般没有子标题！注意遵守常见写作格式！！
+        **重要！！**不要不基于已有材料乱编，特别是参考文献，应该使用阅读 answer_from_papers  或者 google_scholar_search 工具来获取参考文献。文章作者应该真实！！abstract，introduction，conclusion 部分一般没有子标题！注意遵守常见写作格式！！
         引用图片时应该仔细思考图片位置，如果在同层目录，则直接引用即可，不用带父文件夹名！！
         1. 你会获得你的任务部分，已经已经完成的其他部分，还有相关材料，例如实验数据，图表，图的说明等。你只能读取文本数据，但是你应该尽可能通过文本数据了解所有材料。(注意 main.tex的引用 sub_tex文件的方法，不要重复添加标题)
         2. 你将根据材料撰写指定部分，但是在撰写 introduction和 related work/review 部分时，一般来说材料不足，你应该通过谷歌搜索，谷歌学术搜素，和网页打开工具来获取更多的参考文献（如果不用下载就可以用来作为参考文献就尽量不要下载，浏览网页即可），记得及时更新 bib 文件，如果没有则新建， 有的话就在已有基础上更新。当然你也可以引用 参考文献pdf 中的参考文献作为自己的参考文献，注意不要乱编参考文献！如果查询到的参考文献只有标题，或者部分作者，那么引用时候就不要编造作者，可以写你查询到的部分。
