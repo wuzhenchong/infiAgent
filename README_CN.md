@@ -66,53 +66,74 @@ MLA 处理整个研究工作流程——从文献搜索和实验设计到代码�
 
 ## 🚀 快速开始
 
-### 安装
+### 方式 1: Docker（推荐 - 无需 Python）
+
+**1. 安装 Docker**
+- Mac/Windows: [Docker Desktop](https://www.docker.com/products/docker-desktop)
+- Linux: `curl -fsSL https://get.docker.com | sh`
+
+**2. 拉取镜像**
+
+```bash
+docker pull chenglinhku/mla:latest
+```
+
+**3. 启动 CLI**
+
+```bash
+cd /你的工作空间
+
+docker run -it --rm \
+  -v $(pwd):/workspace \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 \
+  -p 9641:9641 \
+  chenglinhku/mla:latest \
+  cli
+```
+
+**4. 配置 API Key**
+
+打开浏览器：`http://localhost:9641`
+
+<p align="center">
+  <img src="assets/config_web_screen_shot.png" alt="配置管理界面" width="800">
+</p>
+
+编辑 `run_env_config/llm_config.yaml`，填入 API key 并保存。
+
+**🎉 完成！** 开始使用 MLA CLI。
+
+📖 **[Docker 完整指南](docs/DOCKER_GUIDE.md)**
+
+---
+
+### 方式 2: 本地安装（需要 Python）
 
 **1. 安装包**
 
 ```bash
-# 确保你的 python 或 python3 版本 > 3.10
+# 确保 Python 版本 > 3.10
 cd 安装路径
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 git clone https://github.com/ChenglinPoly/infiAgent.git
 cd infiAgent
 pip install -e .
 ```
 
-**2. 安装 Playwright（网页抓取必需）**
+**2. 安装 Playwright**
 
 ```bash
-playwright install
+playwright install chromium
 ```
 
-或仅安装 Chromium：
+**3. 配置 API Key**
 
 ```bash
-python -m playwright install chromium
+mla-agent --config-set api_key "your-api-key"
 ```
-
-**3. 配置 API Keys**
-
-```bash
-# 查看当前配置（默认：OpenRouter base URL）
-mla-agent --config-show
-
-# 设置 API Key
-mla-agent --config-set api_key "sk-your-api-key-here"
-
-# 设置 Base URL（可选）
-mla-agent --config-set base_url "https://api.openai.com/v1"
-
-# 设置模型列表（可选）
-# 注意：如果你的提供商返回 OpenAI 兼容格式，需添加 'openai/' 前缀
-mla-agent --config-set models '["openai/anthropic/claude-sonnet-4"]'
-```
-
-**重要配置说明：**
-- 对于大多数参数，即使参数本身已包含 "openai"，也要添加 `openai/` 前缀（由于系统路由需求）
-- 例外：`figure_models` 仅支持 OpenRouter，不需要前缀
-- 示例：`figure_models: ["google/gemini-2.0-flash-thinking-exp-01-21"]`
 
 **4. 启动工具服务器**
 
@@ -120,14 +141,14 @@ mla-agent --config-set models '["openai/anthropic/claude-sonnet-4"]'
 mla-tool-server start
 ```
 
-### 使用 CLI 模式运行你的第一个任务
+**5. 启动 CLI**
 
 ```bash
-# !!重要!! 先 cd 到你的工作空间！
-cd 你的工作空间
-
+cd /你的工作空间
 mla-agent --cli
 ```
+
+📖 **[CLI 完整指南](docs/CLI_GUIDE.md)**
 
 ---
 

@@ -43,4 +43,13 @@ Thumbs.db
 # Project specific
 # conversations/
 config/run_env_config/llm_config.yaml
+.env
+
+# Docker related (not needed in repo - use remote image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+docker/
+*.tar.gz
+mla-docker-build.tar.gz
 
