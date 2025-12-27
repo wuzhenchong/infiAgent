@@ -111,6 +111,8 @@ tools:
       - pip_install
       - execute_command
       - target_to_coding_task_agent
+      - human_in_loop
+      - manage_code_process
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
     prompts:
@@ -137,6 +139,10 @@ tools:
             2. 执行代码时，应该使用 execute_code 工具，并给出文件的相对路径。注意execute_code的执行逻辑，再运行代码前，你应该检查是否需要安装一些额外的包，并执行安装。
             3. 代码中关于文件的读取，写入这些操作，应该考虑到execute_code的执行逻辑（默认在code_run目录下执行任何位置的代码），确保文件的读取和写入操作是正确的。
         根据难度进行编排。如果任务比较简单，大部分情况下，非学术研究的编程任务都可以直接完成.例如简单的成本计算，验证等。
+        注意事项：
+        1. 如果是需要挂起执行的例如flask 网站任务，使用后台执行并定向输出文件。检查输出文件进行 debug。同时及时管理运行进程进行终止。
+        2. 网站等视觉任务！一定要在挂起运行后指导人类进行审查！如果需要人类交互（例如让人类反馈网站页面结果或者进一步修改，这种视觉任务 judge agent 无法完成，请交给人类反馈），使用 human_in_loop 工具，并给出人类交互的提示词。
+        3. 确定完成任务后，必须关闭所有遗留进程！
     name: "coder_agent"
     description: "完成各种编程任务！"
     parameters:

@@ -465,20 +465,16 @@ tools:
     level: 0
     type: tool_call_agent
     name: "execute_code"
-    description: "在任务的隔离虚拟环境中执行 Python 或 Bash 代码。默认在 code_run/ 目录下执行。"
+    description: "在任务的隔离虚拟环境中执行 Python 代码。支持直接执行（阻塞等待结果）和后台执行（不阻塞，适合长时间运行的代码如Web服务器）。"
     parameters:
       type: "object"
       properties:
-        language:
-          type: "string"
-          enum: ["python", "bash"]
-          description: "编程语言：python 或 bash。"
         # code:
         #   type: "string"
-        #   description: "要执行的代码内容，可选。如果提供则直接执行此代码。"
+        #   description: "要执行的 Python 代码内容，可选。如果提供则直接执行此代码。"
         file_path:
           type: "string"
-          description: "要执行的代码文件相对路径（相对根目录）,必选"
+          description: "要执行的代码文件相对路径（相对根目录），可选。code 和 file_path 至少提供一个。"
         working_dir:
           type: "string"
           default: "code_run"
@@ -486,12 +482,19 @@ tools:
         use_venv:
           type: "boolean"
           default: true
-          description: "是否使用虚拟环境（仅 Python），默认 true。"
+          description: "是否使用虚拟环境，默认 true。"
         timeout:
           type: "integer"
-          default: 3000
-          description: "执行超时时间（秒），默认 3000。"
-      required: ["language"]
+          default: 30
+          description: "执行超时时间（秒），默认 30。后台执行时此参数无效。"
+        background:
+          type: "boolean"
+          default: false
+          description: "是否后台执行（不阻塞）。适合长时间运行的代码（如Web服务器）。后台执行时必须指定 output_file。"
+        output_file:
+          type: "string"
+          description: "输出重定向到文件的相对路径。后台执行时必需，直接执行时可选。"
+      required: []
 
   pip_install:
     level: 0
@@ -516,13 +519,13 @@ tools:
     level: 0
     type: tool_call_agent
     name: "execute_command"
-    description: "执行制定命令行命令（只允许 grep,pwd等只读指令）。可以指定工作目录。"
+    description: "执行指定命令行命令（只允许 ls、cat、grep、pwd 等只读指令，不允许删除、修改等危险操作）。可以指定工作目录。"
     parameters:
       type: "object"
       properties:
         command:
           type: "string"
-          description: "要执行的 shell 命令，例如 'ls -la' 或 'pwd'。"
+          description: "要执行的 shell 命令，例如 'ls -la' 或 'pwd'。仅限白名单中的安全命令。"
         working_dir:
           type: "string"
           default: "."
@@ -532,6 +535,64 @@ tools:
           default: 30
           description: "命令执行超时时间（秒），默认 30。"
       required: ["command"]
+
+  grep:
+    level: 0
+    type: tool_call_agent
+    name: "grep"
+    description: "在文件中搜索匹配的文本模式（跨平台纯Python实现，支持正则表达式）。可以搜索指定目录或文件，支持递归搜索和文件类型过滤。"
+    parameters:
+      type: "object"
+      properties:
+        pattern:
+          type: "string"
+          description: "要搜索的正则表达式模式，例如 'def.*function' 或 'TODO'。"
+        search_path:
+          type: "string"
+          default: "."
+          description: "搜索路径相对路径，默认为当前工作区根目录。"
+        file_pattern:
+          type: "string"
+          default: "*"
+          description: "文件名匹配模式（支持通配符），如 '*.py'、'*.txt'、'*.md' 等。默认匹配所有文件。"
+        recursive:
+          type: "boolean"
+          default: true
+          description: "是否递归搜索子目录，默认 true。"
+        case_sensitive:
+          type: "boolean"
+          default: true
+          description: "是否大小写敏感，默认 true。"
+        show_line_number:
+          type: "boolean"
+          default: true
+          description: "是否显示行号，默认 true。"
+        max_results:
+          type: "integer"
+          default: 100
+          description: "最大结果数量，默认 100。"
+        context_lines:
+          type: "integer"
+          default: 0
+          description: "显示匹配行前后的上下文行数，默认 0（不显示上下文）。"
+      required: ["pattern"]
+
+  manage_code_process:
+    level: 0
+    type: tool_call_agent
+    name: "manage_code_process"
+    description: "管理后台执行的代码进程。可以查看当前 workspace 的所有后台进程，或终止指定的后台进程。配合 execute_code(background=True) 使用。"
+    parameters:
+      type: "object"
+      properties:
+        action:
+          type: "string"
+          enum: ["list", "kill"]
+          description: "操作类型：'list' 列出后台进程，'kill' 终止指定进程。"
+        process_id:
+          type: "string"
+          description: "要终止的进程ID（仅在 action='kill' 时需要）。从 list 操作的输出中获取。"
+      required: ["action"]
 
   # ==================== 框架必需工具 ====================
 

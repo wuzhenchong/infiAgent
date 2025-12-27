@@ -9,10 +9,16 @@ from typing import Dict, Any, Tuple
 import subprocess
 import sys
 import re
+import time
+from datetime import datetime
 from .file_tools import BaseTool, get_abs_path
 
 #def _create_venv(self, venv_path: Path) -> Tuple[bool, str]:重复两遍要记得同时维护。
 #为了美观，def _create_venv还是重复写两次吧，这样一个一个类比较独立。
+
+# 全局后台进程注册表
+# 格式: {process_id: {task_id, pid, command, output_file, start_time, process_obj}}
+BACKGROUND_PROCESSES = {}
 
 
 class ExecuteCodeTool(BaseTool):
@@ -80,23 +86,33 @@ class ExecuteCodeTool(BaseTool):
     
     def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行代码
+        执行 Python 代码
         
         Parameters:
-            language (str): 编程语言 'python' 或 'bash'
             code (str, optional): 代码内容
             file_path (str, optional): 代码文件相对路径
             working_dir (str, optional): 执行目录相对路径，默认为code_run目录
-            use_venv (bool, optional): 是否使用虚拟环境（仅Python），默认True
-            timeout (int, optional): 超时时间（秒），默认30
+            use_venv (bool, optional): 是否使用虚拟环境，默认True
+            timeout (int, optional): 超时时间（秒），默认30，后台执行时忽略
+            background (bool, optional): 是否后台执行（不阻塞），默认False
+            output_file (str, optional): 输出重定向到文件（相对路径），后台执行时必需
         """
         try:
-            language = parameters.get("language", "python")
             code = parameters.get("code")
             file_path = parameters.get("file_path")
             working_dir = parameters.get("working_dir", "code_run")
             use_venv = parameters.get("use_venv", True)
             timeout = parameters.get("timeout", 30)
+            background = parameters.get("background", False)
+            output_file = parameters.get("output_file")
+            
+            # 后台执行时必须指定输出文件
+            if background and not output_file:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": "output_file is required when background=True"
+                }
             
             workspace = Path(task_id)
             exec_dir = get_abs_path(task_id, working_dir)
@@ -106,11 +122,7 @@ class ExecuteCodeTool(BaseTool):
                 # 创建临时文件
                 code_dir = workspace / "code_run"
                 code_dir.mkdir(parents=True, exist_ok=True)
-                
-                if language == "python":
-                    temp_file = code_dir / "temp_code.py"
-                else:
-                    temp_file = code_dir / "temp_code.sh"
+                temp_file = code_dir / "temp_code.py"
                 
                 with open(temp_file, 'w', encoding='utf-8') as f:
                     f.write(code)
@@ -131,17 +143,17 @@ class ExecuteCodeTool(BaseTool):
                     "error": "Either 'code' or 'file_path' must be provided"
                 }
             
-            # 执行代码
-            if language == "python":
-                output = self._execute_python(workspace, exec_file, exec_dir, use_venv, timeout)
-            elif language == "bash":
-                output = self._execute_bash(exec_file, exec_dir, timeout)
+            # 执行 Python 代码
+            if background:
+                # 后台执行
+                output = self._execute_python_background(
+                    workspace, exec_file, exec_dir, use_venv, output_file
+                )
             else:
-                return {
-                    "status": "error",
-                    "output": "",
-                    "error": f"Unsupported language: {language}"
-                }
+                # 直接执行
+                output = self._execute_python(
+                    workspace, exec_file, exec_dir, use_venv, timeout, output_file
+                )
             
             return {
                 "status": "success",
@@ -162,81 +174,142 @@ class ExecuteCodeTool(BaseTool):
                 "error": str(e)
             }
     
-    def _execute_python(self, workspace: Path, code_file: Path, exec_dir: Path, use_venv: bool, timeout: int) -> str:
-        """执行Python代码"""
+    def _get_python_exec(self, workspace: Path, use_venv: bool) -> Path:
+        """获取 Python 解释器路径"""
         env_dir = workspace / "code_env"
         
         if use_venv:
-            # 检查虚拟环境
             venv_path = env_dir / "venv"
             if not venv_path.exists():
-                # 创建虚拟环境（兼容 Anaconda 和标准 Python）
                 venv_created, error_msg = self._create_venv(venv_path)
                 if not venv_created:
-                    # 创建失败，回退到系统 Python（并记录警告）
                     print(f"⚠️ venv 创建失败，使用系统 Python: {error_msg[:100]}")
-                    python_exec = sys.executable
+                    return Path(sys.executable)
                 else:
-                    # 使用虚拟环境的 Python
                     if sys.platform == "win32":
-                        python_exec = venv_path / "Scripts" / "python.exe"
+                        return venv_path / "Scripts" / "python.exe"
                     else:
-                        python_exec = venv_path / "bin" / "python"
+                        return venv_path / "bin" / "python"
             else:
-                # 虚拟环境已存在
                 if sys.platform == "win32":
-                    python_exec = venv_path / "Scripts" / "python.exe"
+                    return venv_path / "Scripts" / "python.exe"
                 else:
-                    python_exec = venv_path / "bin" / "python"
+                    return venv_path / "bin" / "python"
         else:
-            python_exec = sys.executable
+            return Path(sys.executable)
+    
+    def _execute_python(self, workspace: Path, code_file: Path, exec_dir: Path, use_venv: bool, timeout: int, output_file: str = None) -> str:
+        """执行Python代码（直接模式）"""
+        python_exec = self._get_python_exec(workspace, use_venv)
         
-        # 执行代码
-        result = subprocess.run(
-            [str(python_exec), str(code_file)],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(exec_dir),
-            stdin=subprocess.DEVNULL  # 修复 "Bad file descriptor" 错误
-        )
+        # 如果指定了输出文件，重定向输出
+        if output_file:
+            output_path = get_abs_path(str(workspace), output_file)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(output_path, 'w', encoding='utf-8') as out_f:
+                result = subprocess.run(
+                    [str(python_exec), str(code_file)],
+                    stdout=out_f,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=timeout,
+                    cwd=str(exec_dir),
+                    stdin=subprocess.DEVNULL
+                )
+            
+            output = f"代码执行完成，输出已保存到: {output_file}\n"
+            output += f"Exit code: {result.returncode}"
+            
+            # 读取部分输出用于显示
+            try:
+                with open(output_path, 'r', encoding='utf-8') as f:
+                    content = f.read(1000)  # 读取前1000字符
+                    if len(content) == 1000:
+                        output += f"\n\n输出预览（前1000字符）:\n{content}\n..."
+                    else:
+                        output += f"\n\n完整输出:\n{content}"
+            except Exception:
+                pass
+            
+            return output
+        else:
+            # 不重定向，直接捕获输出
+            result = subprocess.run(
+                [str(python_exec), str(code_file)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=str(exec_dir),
+                stdin=subprocess.DEVNULL
+            )
+            
+            output = result.stdout
+            if result.stderr:
+                output += f"\nSTDERR:\n{result.stderr}"
+            if result.returncode != 0:
+                output += f"\nExit code: {result.returncode}"
+            
+            return output
+    
+    def _execute_python_background(self, workspace: Path, code_file: Path, exec_dir: Path, use_venv: bool, output_file: str) -> str:
+        """执行Python代码（后台模式，不阻塞）"""
+        python_exec = self._get_python_exec(workspace, use_venv)
         
-        output = result.stdout
-        if result.stderr:
-            output += f"\nSTDERR:\n{result.stderr}"
-        if result.returncode != 0:
-            output += f"\nExit code: {result.returncode}"
+        # 输出文件路径
+        output_path = get_abs_path(str(workspace), output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 打开输出文件
+        out_f = open(output_path, 'w', encoding='utf-8')
+        
+        # 跨平台后台执行
+        if sys.platform == "win32":
+            # Windows: 使用 CREATE_NO_WINDOW + DETACHED_PROCESS
+            CREATE_NO_WINDOW = 0x08000000
+            DETACHED_PROCESS = 0x00000008
+            
+            process = subprocess.Popen(
+                [str(python_exec), str(code_file)],
+                stdout=out_f,
+                stderr=subprocess.STDOUT,
+                cwd=str(exec_dir),
+                stdin=subprocess.DEVNULL,
+                creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+                close_fds=False
+            )
+        else:
+            # Unix/Linux/Mac: 使用 start_new_session
+            process = subprocess.Popen(
+                [str(python_exec), str(code_file)],
+                stdout=out_f,
+                stderr=subprocess.STDOUT,
+                cwd=str(exec_dir),
+                stdin=subprocess.DEVNULL,
+                start_new_session=True
+            )
+        
+        # 生成进程ID并注册
+        process_id = f"bg_{int(time.time())}_{process.pid}"
+        BACKGROUND_PROCESSES[process_id] = {
+            "task_id": str(workspace),
+            "pid": process.pid,
+            "command": str(code_file),
+            "output_file": output_file,
+            "start_time": datetime.now().isoformat(),
+            "process_obj": process
+        }
+        
+        # 不等待进程结束，立即返回
+        output = f"✅ 代码已在后台启动\n"
+        output += f"   Process ID: {process_id}\n"
+        output += f"   PID: {process.pid}\n"
+        output += f"   输出文件: {output_file}\n"
+        output += f"   提示: 使用 file_read 读取 {output_file} 查看执行结果\n"
+        output += f"   管理: 使用 manage_code_process 查看或终止进程"
         
         return output
     
-    def _execute_bash(self, code_file: Path, exec_dir: Path, timeout: int) -> str:
-        """执行Shell脚本（跨平台）"""
-        import sys
-        
-        if sys.platform == "win32":
-            # Windows: 使用PowerShell或cmd
-            # 将.sh文件转换为.bat或使用PowerShell执行
-            shell_cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(code_file)]
-        else:
-            # Unix/Linux/Mac: 使用bash
-            shell_cmd = ["bash", str(code_file)]
-        
-        result = subprocess.run(
-            shell_cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(exec_dir),
-            stdin=subprocess.DEVNULL  # 修复 "Bad file descriptor" 错误
-        )
-        
-        output = result.stdout
-        if result.stderr:
-            output += f"\nSTDERR:\n{result.stderr}"
-        if result.returncode != 0:
-            output += f"\nExit code: {result.returncode}"
-        
-        return output
 
 
 class PipInstallTool(BaseTool):
@@ -737,5 +810,163 @@ class GrepTool(BaseTool):
                 "status": "error",
                 "output": "",
                 "error": str(e)
+            }
+
+
+class CodeProcessManagerTool(BaseTool):
+    """后台代码进程管理工具"""
+    
+    def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        管理后台执行的代码进程
+        
+        Parameters:
+            action (str): 操作类型 'list' 或 'kill'
+            process_id (str, optional): 进程ID（kill 时需要）
+        """
+        try:
+            action = parameters.get("action", "list")
+            
+            if action == "list":
+                return self._list_processes(task_id)
+            elif action == "kill":
+                process_id = parameters.get("process_id")
+                if not process_id:
+                    return {
+                        "status": "error",
+                        "output": "",
+                        "error": "process_id is required for kill action"
+                    }
+                return self._kill_process(task_id, process_id)
+            else:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": f"Unknown action: {action}. Use 'list' or 'kill'"
+                }
+        
+        except Exception as e:
+            return {
+                "status": "error",
+                "output": "",
+                "error": str(e)
+            }
+    
+    def _list_processes(self, task_id: str) -> Dict[str, Any]:
+        """列出指定 workspace 的后台进程"""
+        workspace_processes = []
+        
+        # 清理已结束的进程
+        finished_ids = []
+        for proc_id, info in BACKGROUND_PROCESSES.items():
+            process = info.get("process_obj")
+            if process and process.poll() is not None:
+                # 进程已结束
+                finished_ids.append(proc_id)
+        
+        for proc_id in finished_ids:
+            del BACKGROUND_PROCESSES[proc_id]
+        
+        # 筛选当前 workspace 的进程
+        for proc_id, info in BACKGROUND_PROCESSES.items():
+            if info["task_id"] == task_id:
+                process = info.get("process_obj")
+                status = "running" if process and process.poll() is None else "finished"
+                
+                workspace_processes.append({
+                    "process_id": proc_id,
+                    "pid": info["pid"],
+                    "command": info["command"],
+                    "output_file": info["output_file"],
+                    "start_time": info["start_time"],
+                    "status": status
+                })
+        
+        if not workspace_processes:
+            output = "当前 workspace 没有后台运行的代码进程"
+        else:
+            output = f"后台代码进程列表（共 {len(workspace_processes)} 个）:\n\n"
+            for i, proc in enumerate(workspace_processes, 1):
+                output += f"{i}. Process ID: {proc['process_id']}\n"
+                output += f"   PID: {proc['pid']}\n"
+                output += f"   命令: {proc['command']}\n"
+                output += f"   输出: {proc['output_file']}\n"
+                output += f"   启动: {proc['start_time']}\n"
+                output += f"   状态: {proc['status']}\n\n"
+        
+        return {
+            "status": "success",
+            "output": output,
+            "error": ""
+        }
+    
+    def _kill_process(self, task_id: str, process_id: str) -> Dict[str, Any]:
+        """终止指定的后台进程"""
+        # 检查进程是否存在
+        if process_id not in BACKGROUND_PROCESSES:
+            return {
+                "status": "error",
+                "output": "",
+                "error": f"Process not found: {process_id}"
+            }
+        
+        info = BACKGROUND_PROCESSES[process_id]
+        
+        # 安全检查：只能终止本 workspace 的进程
+        if info["task_id"] != task_id:
+            return {
+                "status": "error",
+                "output": "",
+                "error": f"Permission denied: Process belongs to another workspace"
+            }
+        
+        process = info.get("process_obj")
+        pid = info["pid"]
+        
+        # 检查进程是否还在运行
+        if process and process.poll() is None:
+            # 进程仍在运行，尝试终止
+            try:
+                process.terminate()
+                
+                # 等待最多 3 秒
+                try:
+                    process.wait(timeout=3)
+                    status = "terminated"
+                except subprocess.TimeoutExpired:
+                    # 强制 kill
+                    process.kill()
+                    process.wait(timeout=1)
+                    status = "killed"
+                
+                # 从注册表移除
+                del BACKGROUND_PROCESSES[process_id]
+                
+                output = f"✅ 进程已终止\n"
+                output += f"   Process ID: {process_id}\n"
+                output += f"   PID: {pid}\n"
+                output += f"   状态: {status}\n"
+                output += f"   输出文件: {info['output_file']}"
+                
+                return {
+                    "status": "success",
+                    "output": output,
+                    "error": ""
+                }
+            
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": f"终止进程失败: {str(e)}"
+                }
+        else:
+            # 进程已结束
+            del BACKGROUND_PROCESSES[process_id]
+            
+            return {
+                "status": "success",
+                "output": f"进程已结束（无需终止）\n   Process ID: {process_id}\n   输出文件: {info['output_file']}",
+                "error": ""
             }
 

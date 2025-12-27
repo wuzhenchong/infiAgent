@@ -599,11 +599,11 @@ class InteractiveCLI:
         cmd_args = [
             sys.executable,
             str(start_py),
-            '--task_id', self.task_id,
-            '--agent_name', agent_name,
-            '--user_input', user_input,
-            '--agent_system', self.agent_system,
-            '--jsonl'  # JSONL 模式，实时流式输出
+                '--task_id', self.task_id,
+                '--agent_name', agent_name,
+                '--user_input', user_input,
+                '--agent_system', self.agent_system,
+                '--jsonl'  # JSONL 模式，实时流式输出
         ]
         
         # 添加权限模式参数

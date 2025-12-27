@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List, Tuple
 import uvicorn
+import asyncio
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -52,7 +53,9 @@ from tools import (
     HumanInLoopTool,
     ExecuteCodeTool,
     PipInstallTool,
-    ExecuteCommandTool
+    ExecuteCommandTool,
+    GrepTool,
+    CodeProcessManagerTool
 )
 from tools.human_tools import (
     get_hil_status, respond_hil_task, list_hil_tasks, get_hil_task_for_workspace,
@@ -91,6 +94,8 @@ TOOLS = {
     "execute_code": ExecuteCodeTool(),
     "pip_install": PipInstallTool(),
     "execute_command": ExecuteCommandTool(),
+    "grep": GrepTool(),
+    "manage_code_process": CodeProcessManagerTool(),
 }
 
 
@@ -233,14 +238,19 @@ async def execute_tool_old_api(request: OldToolExecuteRequest):
         
         # 执行工具（支持异步工具）
         if hasattr(tool, 'execute_async'):
+            # 异步工具直接 await
             result = await tool.execute_async(
                 task_id=request.task_id,
                 parameters=request.params
             )
         else:
-            result = tool.execute(
-                task_id=request.task_id,
-                parameters=request.params
+            # 同步工具在线程池中执行，避免阻塞事件循环
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,  # 使用默认线程池
+                tool.execute,
+                request.task_id,
+                request.params
             )
         
         # 返回旧版格式
@@ -286,14 +296,19 @@ async def execute_tool(tool_name: str, request: ToolExecuteRequest):
         
         # 执行工具（支持异步工具）
         if hasattr(tool, 'execute_async'):
+            # 异步工具直接 await
             result = await tool.execute_async(
                 task_id=request.task_id,
                 parameters=request.parameters
             )
         else:
-            result = tool.execute(
-                task_id=request.task_id,
-                parameters=request.parameters
+            # 同步工具在线程池中执行，避免阻塞事件循环
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,  # 使用默认线程池
+                tool.execute,
+                request.task_id,
+                request.parameters
             )
         
         return {

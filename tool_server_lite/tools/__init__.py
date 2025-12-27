@@ -37,7 +37,9 @@ from .convert_tools import (
 from .code_tools import (
     ExecuteCodeTool,
     PipInstallTool,
-    ExecuteCommandTool
+    ExecuteCommandTool,
+    GrepTool,
+    CodeProcessManagerTool
 )
 
 __all__ = [
@@ -64,5 +66,7 @@ __all__ = [
     "ExecuteCodeTool",
     "PipInstallTool",
     "ExecuteCommandTool",
+    "GrepTool",
+    "CodeProcessManagerTool",
 ]
 
