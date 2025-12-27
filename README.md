@@ -66,55 +66,74 @@ MLA handles the entire research workflow - from literature search and experiment
 
 ## 🚀 Quick Start
 
-### Installation
+### Option 1: Docker (Recommended - No Python Required)
+
+**1. Install Docker**
+- Mac/Windows: [Docker Desktop](https://www.docker.com/products/docker-desktop)
+- Linux: `curl -fsSL https://get.docker.com | sh`
+
+**2. Pull Image**
+
+```bash
+docker pull chenglinhku/mla:latest
+```
+
+**3. Start CLI**
+
+```bash
+cd /your/workspace
+
+docker run -it --rm \
+  -v $(pwd):/workspace \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 \
+  -p 9641:9641 \
+  chenglinhku/mla:latest \
+  cli
+```
+
+**4. Configure API Key**
+
+Open browser: `http://localhost:9641`
+
+<p align="center">
+  <img src="assets/config_web_screen_shot.png" alt="Configuration Web Interface" width="800">
+</p>
+
+Edit `run_env_config/llm_config.yaml`, fill in your API key, and save.
+
+**🎉 Done!** Start using MLA CLI.
+
+📖 **[Complete Docker Guide](docs/DOCKER_GUIDE.md)**
+
+---
+
+### Option 2: Local Installation (Python Required)
 
 **1. Install the package**
 
 ```bash
-#ensure your python or python3 version >3.10
+# Ensure Python version > 3.10
 cd install_path
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 git clone https://github.com/ChenglinPoly/infiAgent.git
-cd Multi-Level-Agent
+cd infiAgent
 pip install -e .
 ```
 
-**2. Install Playwright (Required for web scraping)**
+**2. Install Playwright**
 
 ```bash
-playwright install
+playwright install chromium
 ```
 
-Or install only Chromium:
+**3. Configure API Key**
 
 ```bash
-python -m playwright install chromium
+mla-agent --config-set api_key "your-api-key"
 ```
-
-
-
-**3. Configure API Keys**
-
-```bash
-# View current configuration (default: OpenRouter base URL)
-mla-agent --config-show
-
-# Set API Key
-mla-agent --config-set api_key "sk-your-api-key-here"
-
-# Set Base URL (optional)
-mla-agent --config-set base_url "https://api.openai.com/v1"
-
-# Set Model List (optional)
-# Note: Add 'openai/' prefix if your provider returns OpenAI-compatible format
-mla-agent --config-set models '["openai/google/gemini-3-flash-preview"]'
-```
-
-**Important Configuration Notes:**
-- For most parameters, add the `openai/` prefix even if the parameter already contains "openai" (due to system routing requirements)
-- Exception: `figure_models` only supports OpenRouter and does not need the prefix
-- Example: `figure_models: ["google/gemini-2.0-flash-thinking-exp-01-21"]`
 
 **4. Start Tool Server**
 
@@ -122,26 +141,14 @@ mla-agent --config-set models '["openai/google/gemini-3-flash-preview"]'
 mla-tool-server start
 ```
 
-<!-- **5. Run Your First Task**
+**5. Start CLI**
 
 ```bash
-mkdir -p ~/my_first_task
-
-mla-agent \
-  --task_id ~/my_first_task \
-  --user_input "List files in the working directory"
-```
-
-**🎉 Done!** Your first agent is running. -->
-
-### Using CLI Mode run your first task
-
-```bash
-#!!important!! cd your workspace fisrst!
-cd your workspace
-
+cd /your/workspace
 mla-agent --cli
 ```
+
+📖 **[Complete CLI Guide](docs/CLI_GUIDE.md)**
 
 ---
 
