@@ -164,6 +164,7 @@ tools:
       - dir_list
       - dir_create
       - final_output
+      - file_download
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
     prompts:
