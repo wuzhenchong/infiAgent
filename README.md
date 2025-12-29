@@ -84,7 +84,8 @@ docker pull chenglinhku/mla:latest
 cd /your/workspace
 
 docker run -it --rm \
-  -v $(pwd):/workspace \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
   -v ~/.mla_v3:/root/mla_v3 \
   -v mla-config:/mla_config \
   -p 8002:8002 \
@@ -661,22 +662,22 @@ function runAgent(
   onEvent: (event: AgentEvent) => void
 ): Promise<AgentEvent> {
   return new Promise((resolve, reject) => {
-    const child = spawn('mla-agent', [
-      '--task_id', workspacePath,
-      '--user_input', userInput,
-      '--jsonl'
-    ]);
-    
+  const child = spawn('mla-agent', [
+    '--task_id', workspacePath,
+    '--user_input', userInput,
+    '--jsonl'
+  ]);
+  
     let buffer = '';
     
-child.stdout.on('data', (data) => {
+  child.stdout.on('data', (data) => {
       buffer += data.toString();
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
       
       lines.forEach(line => {
-    if (!line.trim()) return;
-    
+      if (!line.trim()) return;
+      
         try {
           const event: AgentEvent = JSON.parse(line);
           onEvent(event);
@@ -703,21 +704,21 @@ child.stdout.on('data', (data) => {
 
 // Usage
 await runAgent('/path/to/workspace', 'Write unit tests', (event) => {
-  switch (event.type) {
-    case 'start':
+      switch (event.type) {
+        case 'start':
       console.log(`Task started: ${event.task}`);
-      break;
-    case 'token':
+          break;
+        case 'token':
       process.stdout.write(event.text);
       break;
     case 'progress':
       updateProgressBar(event.pct);
-      break;
-    case 'result':
+          break;
+        case 'result':
       console.log(`\nResult: ${event.summary}`);
-      break;
-  }
-});
+          break;
+      }
+    });
 ```
 
 ---

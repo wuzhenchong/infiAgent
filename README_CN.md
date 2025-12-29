@@ -85,7 +85,8 @@ docker pull chenglinhku/mla:latest
 cd /你的工作空间
 
 docker run -it --rm \
-  -v $(pwd):/workspace \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
   -v ~/.mla_v3:/root/mla_v3 \
   -v mla-config:/mla_config \
   -p 8002:8002 \
