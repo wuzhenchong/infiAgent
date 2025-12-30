@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="infiAgent Logo" width="200">
 </p>
 
-# MLA V3 - 打造专属领域的 SOTA 级智能体
+<h1 align="center">MLA V3 - 打造专属领域的 SOTA 级智能体</h1>
 
 
 
