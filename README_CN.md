@@ -29,6 +29,10 @@
 - 🧪 **科学计算**：ECM 蛋白质配比仿真、物流排班、作业批改等
 - 🔬 **完整研究流程**：文献收集、实验设计、图表生成和论文撰写
 
+### 动态
+
+- 现在已支持 gemini api。重新拉取仓库，mla-tool-server restart，或者重新拉取 docker 即可生效。配置文件参考配置文件夹 gemini 开头的样板格式。
+
 注意目前只支持 python 编程，早期版本execute_command只支持只读命令，目前已经支持所有命令（包括删除等危险命令），推荐在 docker 环境下使用。
 
 ---
@@ -84,7 +88,7 @@ docker pull chenglinhku/mla:latest
 
 ```bash
 cd /你的工作空间
-
+#5002端口可选，可定义任何端口，如果你希望 agent开发网站之类的需要暴露端口浏览的项目，使用该选项，并告诉 agent 使用该端口进行网站部署。
 docker run -it --rm \
   -e HOST_PWD=$(pwd) \
   -v $(pwd):/workspace$(pwd) \
@@ -92,8 +96,27 @@ docker run -it --rm \
   -v mla-config:/mla_config \
   -p 8002:8002 \
   -p 9641:9641 \
+  -p 5002:5002 \
   chenglinhku/mla:latest \
   cli
+```
+
+windows用户建议使用 docker，目前 win 版本还存在较多问题:
+windows用户目前无法用文件路径管理，得自己编写your_conversaion_id，不同your_conversaion_id维护不同的记忆，每次进入相同 id 将会进入相同对话。
+如有 bug 欢迎提交 issue。
+```bash
+cd /你的工作空间
+#5002端口可选，可定义任何端口，如果你希望 agent开发网站之类的需要暴露端口浏览的项目，使用该选项，并告诉 agent 使用该端口进行网站部署。
+ docker run -it --rm `
+  -e HOST_PWD="/{your_conversaion_id}" `
+  -v "${PWD}:/workspace/{your_conversaion_id}" `
+   -v "${HOME}\.mla_v3:/root/mla_v3" `
+ -v mla-config:/mla_config `
+  -p 8002:8002 `
+ -p 9641:9641 `
+  -p 5002:5002 `
+  chenglinhku/mla:latest `
+ cli
 ```
 
 **4. 配置 API Key**

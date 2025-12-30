@@ -29,6 +29,10 @@ The default configuration in this repository is a **research-oriented semi-speci
 - 🧪 **Scientific Computing**: ECM protein simulation, logistics scheduling, assignment grading, etc.
 - 🔬 **Full Research Pipeline**: Literature collection, experiments, figures, and paper drafting
 
+### Update
+
+- support gemini api key from google ai studio now. Please See the gemini config in dir.
+
 Attention: Current coding task only support python project. Other language may supported later. In old version execute_command only support safe command like cd or grep，now it include every commands including rm. Please try to use it in docker mode if your task may edit system file.
 
 ## 🎬 Outputs
@@ -82,7 +86,7 @@ docker pull chenglinhku/mla:latest
 
 ```bash
 cd /your/workspace
-
+#5002 is a port optional. If you want to agent dev a web or something need expose a port. Please Use it And talk to agent using this port for dev.
 docker run -it --rm \
   -e HOST_PWD=$(pwd) \
   -v $(pwd):/workspace$(pwd) \
@@ -90,8 +94,25 @@ docker run -it --rm \
   -v mla-config:/mla_config \
   -p 8002:8002 \
   -p 9641:9641 \
+  -p 5002:5002 \
   chenglinhku/mla:latest \
   cli
+```
+
+windows:
+windows user need to manage different conversation id(task id) by self. Different task id will keep different memory.
+```bash
+#5002 is a port optional. If you want to agent dev a web or something need expose a port. Please Use it And talk to agent using this port for dev.
+ docker run -it --rm `
+  -e HOST_PWD="/{your_conversaion_id}" `
+  -v "${PWD}:/workspace/{your_conversaion_id}" `
+   -v "${HOME}\.mla_v3:/root/mla_v3" `
+ -v mla-config:/mla_config `
+  -p 8002:8002 `
+ -p 9641:9641 `
+  -p 5002:5002 `
+  chenglinhku/mla:latest `
+ cli
 ```
 
 **4. Configure API Key**

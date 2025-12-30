@@ -284,6 +284,8 @@ tools:
       properties:
         keys:
           type: "array"
+          items:
+            type: "string"
           description: "要删除的引用键（如 'sun2023blockchain'）或引用键数组。"
         bib_path:
           type: "string"
@@ -549,7 +551,7 @@ tools:
         output_file:
           type: "string"
           description: "输出重定向到文件的相对路径。后台执行时必需，直接执行时可选。"
-      required: []
+      required: ["file_path"]
 
   pip_install:
     level: 0

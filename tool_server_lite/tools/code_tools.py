@@ -521,7 +521,7 @@ class ExecuteCommandTool(BaseTool):
         Returns:
             (是否安全, 错误信息)
         """
-        return True
+        return True,"不检查"
         command = command.strip()
         
         if not command:
