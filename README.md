@@ -4,13 +4,14 @@
 
 # MLA V3 - Build Domain-Specific SOTA-Level AI Agents
 
-[English](README.md) | [简体中文](README_CN.md)
+
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.0.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/python-3.9+-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/license-GPL-blue.svg" alt="License: GPL">
 </p>
+[English](README.md) | [简体中文](README_CN.md)
 
 ## 🌟 Introduction
 
