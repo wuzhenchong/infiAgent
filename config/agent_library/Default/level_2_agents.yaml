@@ -17,6 +17,7 @@ tools:
       - dir_list
       - dir_create
       - final_output
+      - answer_from_papers
       - human_in_loop
       - file_move
       - file_write

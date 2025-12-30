@@ -42,6 +42,12 @@ from .code_tools import (
     CodeProcessManagerTool
 )
 
+from .reference_tools import (
+    ReferenceListTool,
+    ReferenceAddTool,
+    ReferenceDeleteTool
+)
+
 __all__ = [
     "FileReadTool",
     "FileWriteTool",
@@ -68,5 +74,8 @@ __all__ = [
     "ExecuteCommandTool",
     "GrepTool",
     "CodeProcessManagerTool",
+    "ReferenceListTool",
+    "ReferenceAddTool",
+    "ReferenceDeleteTool",
 ]
 

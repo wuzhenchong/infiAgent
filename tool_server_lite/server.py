@@ -55,7 +55,10 @@ from tools import (
     PipInstallTool,
     ExecuteCommandTool,
     GrepTool,
-    CodeProcessManagerTool
+    CodeProcessManagerTool,
+    ReferenceListTool,
+    ReferenceAddTool,
+    ReferenceDeleteTool
 )
 from tools.human_tools import (
     get_hil_status, respond_hil_task, list_hil_tasks, get_hil_task_for_workspace,
@@ -96,6 +99,9 @@ TOOLS = {
     "execute_command": ExecuteCommandTool(),
     "grep": GrepTool(),
     "manage_code_process": CodeProcessManagerTool(),
+    "reference_list": ReferenceListTool(),
+    "reference_add": ReferenceAddTool(),
+    "reference_delete": ReferenceDeleteTool(),
 }
 
 
@@ -193,16 +199,22 @@ async def create_task(request: TaskCreateRequest = None, task_id: str = None, ta
             workspace.mkdir(parents=True, exist_ok=True)
         
         # 创建必要的子文件夹
-        (workspace / "upload").mkdir(exist_ok=True)
+        (workspace / "temp").mkdir(exist_ok=True)
         (workspace / "code_run").mkdir(exist_ok=True)
         (workspace / "code_env").mkdir(exist_ok=True)
+        
+        # 创建默认的 reference.bib 文件（如果不存在）
+        reference_bib = workspace / "reference.bib"
+        if not reference_bib.exists():
+            reference_bib.write_text("", encoding='utf-8')
         
         return {
             "success": True,
             "message": f"Task workspace ready: {workspace}",
             "data": {
                 "workspace": str(workspace),
-                "created_folders": ["upload", "code_run", "code_env"]
+                "created_folders": ["temp", "code_run", "code_env"],
+                "created_files": ["reference.bib"]
             }
         }
     except Exception as e:

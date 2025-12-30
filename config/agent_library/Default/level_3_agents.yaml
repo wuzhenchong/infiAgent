@@ -10,12 +10,15 @@ tools:
       - create_figures_agent
       - human_in_loop
       - judge_agent
-      - final_output
       - file_read
       - file_write
       - file_move
       - dir_list
       - dir_create
+      - reference_list
+      - reference_add
+      - reference_delete
+      - final_output
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
     prompts:

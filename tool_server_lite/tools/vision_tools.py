@@ -30,10 +30,11 @@ class VisionTool(BaseTool):
             image_path (str): 图片文件相对路径（相对于任务目录）
             question (str, optional): 要问的问题，默认"请描述这张图片的内容"
             model (str, optional): 模型名称，默认使用配置中的模型
+            save_path (str, optional): 保存分析结果的相对路径
         
         Returns:
             status: "success" 或 "error"
-            output: 分析结果文本
+            output: 分析结果文本或保存位置信息
             error: 错误信息（如有）
         """
         try:
@@ -41,6 +42,7 @@ class VisionTool(BaseTool):
             image_path = parameters.get("image_path")
             question = parameters.get("question", "请描述这张图片的内容")
             model = parameters.get("model")
+            save_path = parameters.get("save_path")
             
             if not image_path:
                 return {
@@ -62,9 +64,19 @@ class VisionTool(BaseTool):
                     model=model
                 )
                 
+                # 保存分析结果
+                if save_path:
+                    abs_save_path = get_abs_path(task_id, save_path)
+                    abs_save_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(abs_save_path, 'w', encoding='utf-8') as f:
+                        f.write(result)
+                    output = f"结果保存在 {save_path}"
+                else:
+                    output = result
+                
                 return {
                     "status": "success",
-                    "output": result,
+                    "output": output,
                     "error": ""
                 }
                 

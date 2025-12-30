@@ -52,4 +52,5 @@ docker-compose.yml
 docker/
 *.tar.gz
 mla-docker-build.tar.gz
+test_doc/
 

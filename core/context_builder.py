@@ -65,7 +65,7 @@ class ContextBuilder:
         
         # 2️⃣ 构建各个动态部分
         user_latest_input = self._build_user_latest_input(current)
-        user_agent_history = self._build_user_agent_history(task_id)
+        user_agent_history = self._build_user_agent_history(task_id, current)
         structured_call_info = self._build_structured_call_info(current, agent_id)
         current_thinking = self._build_current_thinking(task_id, agent_id, current)
         action_history_xml = self._build_action_history(task_id, agent_id)
@@ -154,15 +154,20 @@ class ContextBuilder:
         
         return "\n".join(result)
     
-    def _build_user_agent_history(self, task_id: str) -> str:
+    def _build_user_agent_history(self, task_id: str, current: Dict = None) -> str:
         """
         检查并压缩用户-智能体历史交互（只在启动时执行一次）
+        
+        Args:
+            task_id: 任务ID
+            current: 当前任务数据（包含用户输入）
         
         Returns:
             压缩后的历史交互文本（已包含<用户-智能体历史交互>标签）
         """
         context = self.hierarchy_manager.get_context()
-        current = context.get("current", {})
+        if current is None:
+            current = context.get("current", {})
         history = context.get("history", [])
         
         if not history:
@@ -179,21 +184,30 @@ class ContextBuilder:
         if len(str(history)) < 5000:
             return str(history)
         
+        # 提取当前任务的用户输入
+        current_task = ""
+        instructions = current.get("instructions", [])
+        if instructions:
+            # 将所有用户输入拼接起来
+            user_inputs = [instr.get("instruction", "") for instr in instructions]
+            current_task = "\n".join(user_inputs)
+        
         safe_print("首次压缩历史交互...")
-        compressed_result = self._compress_user_agent_history_with_llm(history, task_id)
+        compressed_result = self._compress_user_agent_history_with_llm(history, task_id, current_task)
         
         context["current"]["_compressed_user_agent_history"] = compressed_result
         self.hierarchy_manager._save_context(context)
         
         return compressed_result
     
-    def _compress_user_agent_history_with_llm(self, history: List[Dict], task_id: str) -> str:
+    def _compress_user_agent_history_with_llm(self, history: List[Dict], task_id: str, current_task: str = "") -> str:
         """
         使用LLM压缩历史交互（直接返回LLM输出，不解析）
         
         Args:
             history: 历史任务列表
             task_id: 任务ID
+            current_task: 当前任务的用户输入内容
             
         Returns:
             压缩后的文本（LLM原始输出）
@@ -233,7 +247,17 @@ class ContextBuilder:
                 "agents": agent_summaries
             })
         
-        prompt = f"""请分析以下历史交互数据，提取关键信息并总结。
+        # 构建prompt，根据是否有当前任务来调整重点
+        if current_task:
+            task_context = f"""
+当前任务：
+{current_task}
+
+请特别关注与当前任务相关的历史信息，重点介绍相关的历史任务、生成的文件和中间结果。"""
+        else:
+            task_context = ""
+        
+        prompt = f"""请分析以下历史交互数据，提取关键信息并总结。{task_context}
 
 历史任务数据：
 {json.dumps(full_history_data, ensure_ascii=False, indent=2)}
@@ -241,9 +265,11 @@ class ContextBuilder:
 请总结以下内容：
 1. 文件空间总结：描述当前工作空间文件结构，结果文件对应的task，和简要介绍，同时列出一些重点的中间材料和文件。基于历史的final_output和thinking来推断
 2. 历史交互概览：简要描述每次任务的用户输入和完成情况
+{"3. 相关性分析：重点说明哪些历史任务、文件和结果与当前任务相关，以及如何利用这些信息" if current_task else ""}
 
 要求：
 - 每个描述要简洁明了
+{"- 优先详细介绍与当前任务相关的历史内容" if current_task else ""}
 - 总字符数控制在3000字以内
 - 使用中文输出
 - 直接输出总结内容文本，不需要任何标记，不要使用markdown格式"""
