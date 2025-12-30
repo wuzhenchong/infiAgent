@@ -94,6 +94,21 @@ docker run -it --rm \
   cli
 ```
 
+windows:
+windows user need to manage different conversation id(task id) by self. Different task id will keep different memory.
+```bash
+ docker run -it --rm `
+  -e HOST_PWD="/{your_conversaion_id}" `
+  -v "${PWD}:/workspace/{your_conversaion_id}" `
+   -v "${HOME}\.mla_v3:/root/mla_v3" `
+ -v mla-config:/mla_config `
+  -p 8002:8002 `
+ -p 9641:9641 `
+  -p 5002:5002 `
+  chenglinhku/mla:latest `
+ cli
+```
+
 **4. Configure API Key**
 
 Open browser: `http://localhost:9641`
