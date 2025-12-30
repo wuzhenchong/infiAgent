@@ -96,6 +96,22 @@ docker run -it --rm \
   cli
 ```
 
+windows用户建议使用 docker，目前 win 版本还存在较多问题:
+windows用户目前无法用文件路径管理，得自己编写your_conversaion_id，不同your_conversaion_id维护不同的记忆，每次进入相同 id 将会进入相同对话。
+如有 bug 欢迎提交 issue。
+```bash
+ docker run -it --rm `
+  -e HOST_PWD="/{your_conversaion_id}" `
+  -v "${PWD}:/workspace/{your_conversaion_id}" `
+   -v "${HOME}\.mla_v3:/root/mla_v3" `
+ -v mla-config:/mla_config `
+  -p 8002:8002 `
+ -p 9641:9641 `
+  -p 5002:5002 `
+  chenglinhku/mla:latest `
+ cli
+```
+
 **4. 配置 API Key**
 
 打开浏览器：`http://localhost:9641`
