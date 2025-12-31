@@ -93,6 +93,8 @@ docker pull chenglinhku/mlav3:latest
 **3. Choose Your Mode**
 
 ### Option A: Web UI Mode (Recommended)
+open localhost:9641 to set keys and baseurl.
+open localhost:4242 to use web UI.
 
 ```bash
 cd /your/workspace
