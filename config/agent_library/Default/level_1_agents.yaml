@@ -96,6 +96,7 @@ tools:
       - reference_delete
       - final_output
       - answer_from_papers
+      - file_download
       - human_in_loop
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
@@ -104,6 +105,7 @@ tools:
         收集谷歌学术中的论文标题，doi，摘要，作者，出版年份，引用次数等信息。
       agent_workflow: |
         **参考流程:**
+          attention:pdf文件应该使用 file_download 下载.
           1.基于你的需求搜索谷歌学术的信息。如需详细信息，可以使用crawl_page获取详细信息，如果无返回内容，证明该篇文章网络人机验证，则只使用搜索信息即可。
           2.如果有有效信息且符合需求，及时记录在 reference.bib 中。
           3.如果需求明确要用到文章原文，在收集所有所需文章列表后，使用human_in_loop请求人类下载原文到文件空间。

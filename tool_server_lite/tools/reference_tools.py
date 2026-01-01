@@ -62,11 +62,11 @@ class ReferenceListTool(BaseTool):
 
 
 class ReferenceAddTool(BaseTool):
-    """添加参考文献（如有同名则覆盖）"""
+    """添加参考文献（追加模式，不修改原有内容）"""
     
     def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        向 reference.bib 添加参考文献，如果引用键已存在则覆盖
+        向 reference.bib 添加参考文献（使用追加模式，不会修改原有内容）
         
         Parameters:
             entries (list): 参考文献字符串数组，每个元素是一条完整的bib条目
@@ -76,6 +76,8 @@ class ReferenceAddTool(BaseTool):
             status: "success" 或 "error"
             output: 添加结果信息
             error: 错误信息（如有）
+        
+        注意：本工具使用追加模式，不会解析和重写原有内容，确保原始数据安全
         """
         try:
             entries = parameters.get("entries", [])
@@ -96,68 +98,51 @@ class ReferenceAddTool(BaseTool):
             # 如果文件不存在，创建它
             if not abs_bib_path.exists():
                 abs_bib_path.parent.mkdir(parents=True, exist_ok=True)
-                existing_content = ""
+                needs_separator = False
+                needs_newline = False
             else:
-                # 读取现有内容
-                with open(abs_bib_path, 'r', encoding='utf-8') as f:
-                    existing_content = f.read()
-            
-            # 解析现有条目
-            existing_entries = self._parse_bib_entries(existing_content)
-            existing_dict = {entry["key"]: entry["content"] for entry in existing_entries}
-            
-            # 处理新条目
-            added_count = 0
-            replaced_count = 0
-            replaced_keys = []
-            
-            for entry in entries:
-                entry = entry.strip()
-                if not entry:
-                    continue
-                
-                # 提取key
-                key = self._extract_key_from_entry(entry)
-                if not key:
-                    continue
-                
-                # 检查是否是覆盖操作
-                if key in existing_dict:
-                    replaced_count += 1
-                    replaced_keys.append(key)
+                # 检查文件是否为空，以及是否以换行符结尾
+                file_size = abs_bib_path.stat().st_size
+                if file_size == 0:
+                    needs_separator = False
+                    needs_newline = False
                 else:
-                    added_count += 1
+                    with open(abs_bib_path, 'rb') as f:
+                        f.seek(-1, 2)  # 移到最后一个字符
+                        last_char = f.read(1)
+                        needs_separator = True
+                        # 如果不是换行符，需要先加换行
+                        needs_newline = (last_char != b'\n')
+            
+            # 使用追加模式打开文件
+            with open(abs_bib_path, 'a', encoding='utf-8') as f:
+                # 如果需要，先添加分隔
+                if needs_separator:
+                    if needs_newline:
+                        f.write('\n')
+                    f.write('\n')
                 
-                # 更新或添加
-                existing_dict[key] = entry
+                # 追加所有新条目
+                added_count = 0
+                for entry in entries:
+                    entry = entry.strip()
+                    if not entry:
+                        continue
+                    
+                    f.write(entry)
+                    f.write('\n\n')
+                    added_count += 1
             
-            # 重新组装文件内容
-            new_content_parts = []
-            for key in existing_dict:
-                entry = existing_dict[key]
-                new_content_parts.append(entry)
-            
-            new_content = '\n\n'.join(new_content_parts)
-            if new_content and not new_content.endswith('\n'):
-                new_content += '\n'
-            
-            # 写入文件
-            with open(abs_bib_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-            
-            # 生成结果信息
-            result_parts = []
-            if added_count > 0:
-                result_parts.append(f"成功添加 {added_count} 条新参考文献")
-            if replaced_count > 0:
-                result_parts.append(f"覆盖了 {replaced_count} 条已存在的参考文献: {', '.join(replaced_keys)}")
-            
-            if not result_parts:
-                result_parts.append("没有有效的文献被添加")
+            if added_count == 0:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": "没有有效的文献被添加"
+                }
             
             return {
                 "status": "success",
-                "output": "\n".join(result_parts),
+                "output": f"成功添加 {added_count} 条参考文献",
                 "error": ""
             }
             
@@ -167,41 +152,6 @@ class ReferenceAddTool(BaseTool):
                 "output": "",
                 "error": f"添加失败: {str(e)}"
             }
-    
-    def _parse_bib_entries(self, content: str) -> List[Dict[str, str]]:
-        """解析bib文件内容，提取所有条目（改进版，支持多种格式）"""
-        if not content.strip():
-            return []
-        
-        entries = []
-        # 改进的正则表达式：
-        # 1. 匹配 @type{key, 后面的任意内容
-        # 2. 使用括号计数来找到匹配的右括号
-        # 3. 支持多行和单行格式
-        pattern = r'@(\w+)\s*\{\s*([^,\s]+)\s*,([^}]*)\}'
-        
-        matches = re.finditer(pattern, content, re.DOTALL)
-        
-        for match in matches:
-            entry_type = match.group(1)
-            entry_key = match.group(2).strip()
-            entry_content = match.group(0)
-            
-            entries.append({
-                "type": entry_type,
-                "key": entry_key,
-                "content": entry_content
-            })
-        
-        return entries
-    
-    def _extract_key_from_entry(self, entry: str) -> str:
-        """从单个bib条目中提取引用键（改进版，更健壮）"""
-        # 匹配 @type{key, 的模式，key不包含逗号和空格
-        match = re.search(r'@\w+\s*\{\s*([^,\s]+)\s*,', entry)
-        if match:
-            return match.group(1).strip()
-        return ""
 
 
 class ReferenceDeleteTool(BaseTool):
@@ -413,28 +363,28 @@ if __name__ == "__main__":
     result = list_tool.execute("test_reference", {"bib_path": "reference.bib"})
     print(f"输出:\n{result['output']}\n")
     
-    # 测试4: 测试覆盖功能（添加已存在的key）
+    # 测试4: 测试追加模式（再次添加一条文献）
     print("=" * 60)
-    print("测试4: 测试覆盖功能（重新添加 li2021evolutionary）")
+    print("测试4: 测试追加模式（添加第4条文献）")
     print("=" * 60)
     
-    updated_entry = """@article{li2021evolutionary,
-  title={更新后的标题 - 测试覆盖功能},
-  author={更新的作者},
+    another_entry = """@article{wang2024test,
+  title={测试追加模式的文献},
+  author={王测试},
   journal={测试期刊},
   year={2024}
 }"""
     
     result = add_tool.execute("test_reference", {
         "bib_path": "reference.bib",
-        "entries": [updated_entry]
+        "entries": [another_entry]
     })
     print(f"状态: {result['status']}")
     print(f"输出: {result['output']}\n")
     
-    # 测试4.5: 查看覆盖结果
+    # 测试4.5: 查看追加结果
     print("=" * 60)
-    print("测试4.5: 查看覆盖结果")
+    print("测试4.5: 查看追加结果（应该有4条）")
     print("=" * 60)
     
     result = list_tool.execute("test_reference", {"bib_path": "reference.bib"})
@@ -455,7 +405,7 @@ if __name__ == "__main__":
     
     # 测试6: 最后列出（查看删除结果）
     print("=" * 60)
-    print("测试6: 最后列出所有参考文献（应该剩1条：li2021evolutionary）")
+    print("测试6: 最后列出所有参考文献（应该剩2条：li2021evolutionary, wang2024test）")
     print("=" * 60)
     
     result = list_tool.execute("test_reference", {"bib_path": "reference.bib"})

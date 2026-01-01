@@ -16,8 +16,11 @@ tools:
       - file_read
       - dir_list
       - dir_create
-      - final_output
       - answer_from_papers
+      - reference_list
+      - reference_add
+      - reference_delete
+      - final_output
       - human_in_loop
       - file_move
       - file_write
@@ -61,6 +64,9 @@ tools:
       - answer_from_papers
       - answer_from_figures
       - file_write
+      - reference_list
+      - reference_add
+      - reference_delete
       - final_output
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
@@ -103,7 +109,6 @@ tools:
     type: llm_call_agent
     available_tools:
       - judge_agent
-      - final_output
       - file_read
       - file_write
       - dir_list
@@ -115,6 +120,10 @@ tools:
       - target_to_coding_task_agent
       - human_in_loop
       - manage_code_process
+      - reference_list
+      - reference_add
+      - reference_delete
+      - final_output
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
     prompts:
@@ -167,7 +176,6 @@ tools:
     type: llm_call_agent
     available_tools:
       - judge_agent
-      - final_output
       - file_read
       - file_write
       - move_data_to_clean_directory
@@ -175,6 +183,10 @@ tools:
       - create_figures_by_ai
       - dir_list
       - dir_create
+      - reference_list
+      - reference_add
+      - reference_delete
+      - final_output
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
     prompts:
@@ -215,7 +227,6 @@ tools:
     type: llm_call_agent
     available_tools:
       - judge_agent
-      - final_output
       - file_read
       - file_write
       # - md_to_document_agent
@@ -224,6 +235,10 @@ tools:
       - dir_create
       - file_move
       - move_data_to_clean_directory
+      - reference_list
+      - reference_add
+      - reference_delete
+      - final_output
     max_turns: 100
     model_type: claude-3-7-sonnet-20250219
     prompts:
