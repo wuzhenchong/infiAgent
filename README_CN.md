@@ -40,6 +40,12 @@
 - 🔬 **完整研究流程**：文献收集、实验设计、图表生成和论文撰写
 
 ### 动态
+
+- 上传了视频教程，点击：<a href="https://www.bilibili.com/video/BV142vQB2EDu/?share_source=copy_web&vd_source=8f099df5d40b73e936381e57d7fc05aa
+">infiagent:全自动写作工具</a>
+
+- 修复了文献管理工具的部分 bug，请更新最新代码或者拉取最近镜像 chenglinhku/mlav3
+
 - 现已支持web ui多用户模式。拉取最新镜像网chenglinhku/mlav3进行体验，webui目前属测试阶段存在不稳定因素，最新镜像同时接收cli模式，详见quickstart教程
 
 - 现已支持阿里云api包括qwen，适配绝大部分第三方中转站。配置详情请卡config文件夹对应的参考文件。
@@ -84,6 +90,11 @@ MLA 处理整个研究工作流程——从文献搜索和实验设计到代码�
 ---
 
 ## 🚀 快速开始
+
+### dock版视频演示教程
+
+<a href="https://www.bilibili.com/video/BV142vQB2EDu/?share_source=copy_web&vd_source=8f099df5d40b73e936381e57d7fc05aa
+">infiagent:全自动写作工具</a>
 
 ### 方式 1: Docker（推荐 - 无需 Python）
 
