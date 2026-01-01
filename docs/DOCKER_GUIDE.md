@@ -67,24 +67,46 @@ docker ps
 ### 步骤 1: 拉取镜像
 
 ```bash
-docker pull chenglinhku/mla:latest
+docker pull chenglinhku/mlav3:latest
 ```
 
-### 步骤 2: 启动容器
+### 步骤 2: 选择启动模式
+
+#### 方式 A: Web UI 模式（推荐）
 
 ```bash
 # 进入你的工作目录
 cd /path/to/your/project
 
-# 启动容器
-docker run -it --rm \
-  -v $(pwd):/workspace \
+# 后台启动 Web UI
+docker run -d --name mla \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
   -v ~/.mla_v3:/root/mla_v3 \
   -v mla-config:/mla_config \
   -p 8002:8002 \
   -p 9641:9641 \
-  chenglinhku/mla:latest \
-  cli
+  -p 4242:4242 \
+  chenglinhku/mlav3:latest webui && docker logs -f mla
+```
+
+然后在浏览器打开：`http://localhost:4242`
+
+#### 方式 B: CLI 模式
+
+```bash
+# 进入你的工作目录
+cd /path/to/your/project
+
+# 交互式启动 CLI
+docker run -it --rm \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 \
+  -p 9641:9641 \
+  chenglinhku/mlav3:latest cli
 ```
 
 ### 步骤 3: 配置 API Key
@@ -145,7 +167,7 @@ docker run -it --rm \
 # 进入容器配置
 docker run -it --rm \
   -v mla-config:/mla_config \
-  chenglinhku/mla:latest \
+  chenglinhku/mlav3:latest \
   /bin/bash
 
 # 在容器内
@@ -202,14 +224,32 @@ tar czf mla-conversations-backup.tar.gz ~/.mla_v3
 
 ### 场景 1: 日常研究工作
 
+**使用 Web UI：**
+
+```bash
+cd ~/my_research
+docker run -d --name mla \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 -p 9641:9641 -p 4242:4242 \
+  chenglinhku/mlav3:latest webui && docker logs -f mla
+
+# 打开浏览器: http://localhost:4242
+```
+
+**使用 CLI：**
+
 ```bash
 cd ~/my_research
 docker run -it --rm \
-  -v $(pwd):/workspace \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
   -v ~/.mla_v3:/root/mla_v3 \
   -v mla-config:/mla_config \
   -p 8002:8002 -p 9641:9641 \
-  chenglinhku/mla:latest cli
+  chenglinhku/mlav3:latest cli
 
 [alpha_agent] > 写一篇关于 Transformer 的综述论文
 ```
@@ -217,14 +257,26 @@ docker run -it --rm \
 ### 场景 2: 多项目管理
 
 ```bash
-# 项目 A
+# 项目 A - Web UI
 cd ~/project_a
-docker run ... cli
+docker run -d --name mla-project-a \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 4242:4242 -p 8002:8002 -p 9641:9641 \
+  chenglinhku/mlav3:latest webui
 # 对话历史独立：~/.mla_v3/conversations/{hash_a}_*
 
-# 项目 B（新终端）
+# 项目 B - CLI（新终端）
 cd ~/project_b  
-docker run ... cli
+docker run -it --rm \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 -p 9641:9641 \
+  chenglinhku/mlav3:latest cli
 # 对话历史独立：~/.mla_v3/conversations/{hash_b}_*
 ```
 
@@ -240,24 +292,30 @@ jobs:
       - name: Run MLA
         run: |
           docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
+            -e HOST_PWD=${{ github.workspace }} \
+            -v ${{ github.workspace }}:/workspace${{ github.workspace }} \
             -e OPENROUTER_API_KEY=${{ secrets.API_KEY }} \
-            chenglinhku/mla:latest \
-            task --task_id /workspace --user_input "生成文档"
+            chenglinhku/mlav3:latest \
+            task --task_id ${{ github.workspace }} --user_input "生成文档"
 ```
 
 ### 场景 4: 服务器部署
 
 ```bash
-# 后台运行长时间任务
+# 使用 Web UI 后台运行长时间任务
 docker run -d --name mla-research \
-  -v /data/research:/workspace \
+  -e HOST_PWD=/data/research \
+  -v /data/research:/workspace/data/research \
+  -v ~/.mla_v3:/root/mla_v3 \
   -v mla-config:/mla_config \
-  chenglinhku/mla:latest \
-  task --task_id /workspace --user_input "完成论文"
+  -p 4242:4242 -p 8002:8002 -p 9641:9641 \
+  chenglinhku/mlav3:latest webui
 
 # 查看日志
 docker logs -f mla-research
+
+# 访问 Web UI
+# http://your-server-ip:4242
 ```
 
 ---
@@ -271,7 +329,7 @@ docker logs -f mla-research
 **解决：**
 ```bash
 # 检查端口配置
-docker run --rm chenglinhku/mla:latest \
+docker run --rm chenglinhku/mlav3:latest \
   cat /app/config/run_env_config/tool_config.yaml
 
 # 确保端口一致（默认 8002）
@@ -284,11 +342,11 @@ docker run --rm chenglinhku/mla:latest \
 **解决：**
 ```bash
 # 检查配置是否正确保存
-docker run --rm -v mla-config:/mla_config chenglinhku/mla:latest \
+docker run --rm -v mla-config:/mla_config chenglinhku/mlav3:latest \
   cat /mla_config/llm_config.yaml
 
 # 重新配置
-docker run -it --rm -v mla-config:/mla_config chenglinhku/mla:latest \
+docker run -it --rm -v mla-config:/mla_config chenglinhku/mlav3:latest \
   mla-agent --config-set api_key "your-key"
 ```
 
@@ -299,26 +357,31 @@ docker run -it --rm -v mla-config:/mla_config chenglinhku/mla:latest \
 **解决（Linux）：**
 ```bash
 docker run -it --rm \
-  -v $(pwd):/workspace \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
   -u $(id -u):$(id -g) \
-  chenglinhku/mla:latest cli
+  chenglinhku/mlav3:latest cli
 ```
 
-### Q4: Web 配置界面无法访问
+### Q4: Web UI 界面无法访问
 
-**症状：** `http://localhost:9641` 无法打开
+**症状：** `http://localhost:4242` 无法打开（Web UI）或 `http://localhost:9641` 无法打开（配置界面）
 
 **解决：**
 ```bash
 # 确保端口已暴露
-docker run -it --rm \
-  -v $(pwd):/workspace \
+docker run -d --name mla \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
   -v mla-config:/mla_config \
-  -p 9641:9641 \  # ← 确保这行存在
-  chenglinhku/mla:latest cli
+  -p 4242:4242 \  # ← Web UI 端口
+  -p 9641:9641 \  # ← 配置管理端口
+  chenglinhku/mlav3:latest webui
 
 # 检查端口是否被占用
+lsof -i:4242  # Mac/Linux
 lsof -i:9641  # Mac/Linux
+netstat -ano | findstr 4242  # Windows
 netstat -ano | findstr 9641  # Windows
 ```
 
@@ -331,45 +394,73 @@ netstat -ano | findstr 9641  # Windows
 docker run -it --rm \
   -e LANG=C.UTF-8 \
   -e LC_ALL=C.UTF-8 \
-  -v $(pwd):/workspace \
-  chenglinhku/mla:latest cli
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  chenglinhku/mlav3:latest cli
 ```
 
 ---
 
 ## 🌍 跨平台使用
 
-### Mac / Linux
+### Mac / Linux - CLI 模式
 
 ```bash
 docker run -it --rm \
-  -v $(pwd):/workspace \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
   -v ~/.mla_v3:/root/mla_v3 \
   -v mla-config:/mla_config \
   -p 8002:8002 -p 9641:9641 \
-  chenglinhku/mla:latest cli
+  chenglinhku/mlav3:latest cli
 ```
 
-### Windows PowerShell
+### Mac / Linux - Web UI 模式
+
+```bash
+docker run -d --name mla \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 -p 9641:9641 -p 4242:4242 \
+  chenglinhku/mlav3:latest webui && docker logs -f mla
+```
+
+### Windows PowerShell - CLI 模式
 
 ```powershell
 docker run -it --rm `
-  -v ${PWD}:/workspace `
-  -v ${HOME}\.mla_v3:/root/mla_v3 `
+  -e HOST_PWD="${PWD}" `
+  -v "${PWD}:/workspace${PWD}" `
+  -v "${HOME}\.mla_v3:/root/mla_v3" `
   -v mla-config:/mla_config `
   -p 8002:8002 -p 9641:9641 `
-  chenglinhku/mla:latest cli
+  chenglinhku/mlav3:latest cli
+```
+
+### Windows PowerShell - Web UI 模式
+
+```powershell
+docker run -d --name mla `
+  -e HOST_PWD="${PWD}" `
+  -v "${PWD}:/workspace${PWD}" `
+  -v "${HOME}\.mla_v3:/root/mla_v3" `
+  -v mla-config:/mla_config `
+  -p 8002:8002 -p 9641:9641 -p 4242:4242 `
+  chenglinhku/mlav3:latest webui; docker logs -f mla
 ```
 
 ### Windows CMD
 
 ```cmd
 docker run -it --rm ^
-  -v %cd%:/workspace ^
+  -e HOST_PWD=%cd% ^
+  -v %cd%:/workspace%cd% ^
   -v %USERPROFILE%\.mla_v3:/root/mla_v3 ^
   -v mla-config:/mla_config ^
   -p 8002:8002 -p 9641:9641 ^
-  chenglinhku/mla:latest cli
+  chenglinhku/mlav3:latest cli
 ```
 
 ---
@@ -380,46 +471,85 @@ docker run -it --rm ^
 
 **Mac/Linux (~/.zshrc 或 ~/.bashrc)：**
 ```bash
-alias mla='docker run -it --rm \
-  -v $(pwd):/workspace \
+# CLI 模式
+alias mla-cli='docker run -it --rm \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
   -v ~/.mla_v3:/root/mla_v3 \
   -v mla-config:/mla_config \
   -p 8002:8002 -p 9641:9641 \
-  chenglinhku/mla:latest cli'
+  chenglinhku/mlav3:latest cli'
+
+# Web UI 模式
+alias mla-web='docker run -d --name mla \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 -p 9641:9641 -p 4242:4242 \
+  chenglinhku/mlav3:latest webui && docker logs -f mla'
 
 # 使用
 cd ~/my_project
-mla  # 一键启动！
+mla-cli  # CLI 模式
+# 或
+mla-web  # Web UI 模式 (http://localhost:4242)
 ```
 
 **Windows PowerShell ($PROFILE)：**
 ```powershell
-function mla {
+function mla-cli {
     docker run -it --rm `
-      -v ${PWD}:/workspace `
-      -v ${HOME}\.mla_v3:/root/mla_v3 `
+      -e HOST_PWD="${PWD}" `
+      -v "${PWD}:/workspace${PWD}" `
+      -v "${HOME}\.mla_v3:/root/mla_v3" `
       -v mla-config:/mla_config `
       -p 8002:8002 -p 9641:9641 `
-      chenglinhku/mla:latest cli
+      chenglinhku/mlav3:latest cli
+}
+
+function mla-web {
+    docker run -d --name mla `
+      -e HOST_PWD="${PWD}" `
+      -v "${PWD}:/workspace${PWD}" `
+      -v "${HOME}\.mla_v3:/root/mla_v3" `
+      -v mla-config:/mla_config `
+      -p 8002:8002 -p 9641:9641 -p 4242:4242 `
+      chenglinhku/mlav3:latest webui; docker logs -f mla
 }
 ```
 
 ### 创建启动脚本
 
-**mla-start.sh (Mac/Linux):**
+**mla-cli.sh (Mac/Linux):**
 ```bash
 #!/bin/bash
 docker run -it --rm \
-  -v "$(pwd)":/workspace \
+  -e HOST_PWD="$(pwd)" \
+  -v "$(pwd)":/workspace"$(pwd)" \
   -v ~/.mla_v3:/root/mla_v3 \
   -v mla-config:/mla_config \
   -p 8002:8002 -p 9641:9641 \
-  chenglinhku/mla:latest cli
+  chenglinhku/mlav3:latest cli
+```
+
+**mla-web.sh (Mac/Linux):**
+```bash
+#!/bin/bash
+docker run -d --name mla \
+  -e HOST_PWD="$(pwd)" \
+  -v "$(pwd)":/workspace"$(pwd)" \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 -p 9641:9641 -p 4242:4242 \
+  chenglinhku/mlav3:latest webui && docker logs -f mla
 ```
 
 ```bash
-chmod +x mla-start.sh
-./mla-start.sh
+chmod +x mla-cli.sh mla-web.sh
+./mla-cli.sh  # CLI 模式
+# 或
+./mla-web.sh  # Web UI 模式
 ```
 
 ---
@@ -430,10 +560,15 @@ chmod +x mla-start.sh
 
 ```bash
 # 查看本地镜像信息
-docker images chenglinhku/mla:latest
+docker images chenglinhku/mlav3:latest
 
 # 拉取最新版本
-docker pull chenglinhku/mla:latest
+docker pull chenglinhku/mlav3:latest
+
+# 如果有运行中的容器，需要重启
+docker stop mla
+docker rm mla
+# 然后重新启动
 ```
 
 ### 清理旧镜像
@@ -442,8 +577,9 @@ docker pull chenglinhku/mla:latest
 # 删除旧版本
 docker image prune -a
 
-# 或指定删除
-docker rmi chenglinhku/mla:old-version
+# 或指定删除旧镜像名
+docker rmi chenglinhku/mla:latest  # 旧镜像名
+docker rmi chenglinhku/mlav3:old-version
 ```
 
 ---
@@ -462,8 +598,9 @@ docker stats
 docker run -it --rm \
   --memory="4g" \
   --cpus="2" \
-  -v $(pwd):/workspace \
-  chenglinhku/mla:latest cli
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  chenglinhku/mlav3:latest cli
 ```
 
 ### 清理所有数据
@@ -493,7 +630,9 @@ docker run -it --rm \
   -e HTTP_PROXY=http://proxy.example.com:8080 \
   -e HTTPS_PROXY=http://proxy.example.com:8080 \
   -e NO_PROXY=localhost,127.0.0.1 \
-  chenglinhku/mla:latest cli
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  chenglinhku/mlav3:latest cli
 ```
 
 ### 访问宿主机服务
@@ -505,7 +644,9 @@ docker run -it --rm \
 
 docker run -it --rm \
   --add-host=host.docker.internal:host-gateway \
-  chenglinhku/mla:latest cli
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  chenglinhku/mlav3:latest cli
 ```
 
 ---
@@ -553,6 +694,62 @@ docker-compose run --rm mla-agent
 | 跨平台 | 需适配 | 一致 |
 | 更新 | pip install | docker pull |
 | 配置方式 | CLI/文件 | CLI/文件/**Web** |
+| 界面 | CLI | **CLI + Web UI** |
+
+---
+
+## 🌐 Web UI 模式
+
+新版 Docker 镜像 (`chenglinhku/mlav3:latest`) 包含完整的 Web UI 功能：
+
+### 特性
+
+- ✅ **可视化界面**：直观的对话界面
+- ✅ **多任务管理**：支持多个项目的任务切换
+- ✅ **实时监控**：查看 agent 执行状态
+- ✅ **文件浏览**：直接浏览和编辑工作空间文件
+- ✅ **配置管理**：Web 界面配置 API key 和模型
+- ✅ **历史记录**：查看所有对话历史
+
+### 端口说明
+
+| 端口 | 用途 | 必需 |
+|------|------|------|
+| 4242 | Web UI 主界面 | Web UI 模式 ✅ |
+| 9641 | 配置管理界面 | 推荐 ✅ |
+| 8002 | Tool Server API | 必需 ✅ |
+| XXXX | Agent 开发端口 | 可选 |
+
+### 快速启动 Web UI
+
+```bash
+cd ~/my_project
+docker run -d --name mla \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 4242:4242 -p 9641:9641 -p 8002:8002 \
+  chenglinhku/mlav3:latest webui
+
+# 查看日志
+docker logs -f mla
+
+# 访问界面
+# Web UI: http://localhost:4242
+# 配置管理: http://localhost:9641
+```
+
+### Web UI vs CLI
+
+| 特性 | Web UI | CLI |
+|------|--------|-----|
+| 界面 | 图形化 | 命令行 |
+| 多任务 | ✅ 可视化切换 | 需要多终端 |
+| 文件管理 | ✅ 集成浏览器 | 需要外部工具 |
+| 历史查看 | ✅ 完整展示 | 限制 |
+| 配置管理 | ✅ Web 界面 | CLI 命令 |
+| 适合场景 | 日常使用、演示 | 脚本、CI/CD |
 
 ---
 
@@ -565,5 +762,5 @@ docker-compose run --rm mla-agent
 
 ---
 
-**开始使用 Docker 版 MLA，无需配置环境！** 🐳
+**开始使用 Docker 版 MLA V3，支持 CLI 和 Web UI 双模式！** 🐳
 

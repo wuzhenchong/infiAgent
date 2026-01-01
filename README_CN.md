@@ -40,8 +40,11 @@
 - 🔬 **完整研究流程**：文献收集、实验设计、图表生成和论文撰写
 
 ### 动态
+- 现已支持web ui多用户模式。拉取最新镜像网chenglinhku/mlav3进行体验，webui目前属测试阶段存在不稳定因素，最新镜像同时接收cli模式，详见quickstart教程
 
-- 现在已支持 gemini api。重新拉取仓库，mla-tool-server restart，或者重新拉取 docker 即可生效。配置文件参考配置文件夹 gemini 开头的样板格式。
+- 现已支持阿里云api包括qwen，适配绝大部分第三方中转站。配置详情请卡config文件夹对应的参考文件。
+
+- 现在已支持 gemini api。重新拉取仓库，mla-tool-server restart，或者重新拉取 docker 即可生效。配置文件参考配置文件夹 gemini 开头的样板格式。2025/12/31
 
 注意目前只支持 python 编程，早期版本execute_command只支持只读命令，目前已经支持所有命令（包括删除等危险命令），推荐在 docker 环境下使用。
 
@@ -91,14 +94,45 @@ MLA 处理整个研究工作流程——从文献搜索和实验设计到代码�
 **2. 拉取镜像**
 
 ```bash
-docker pull chenglinhku/mla:latest
+docker pull chenglinhku/mlav3:latest
 ```
 
-**3. 启动 CLI**
+**3. 选择模式**
+
+### 方式 A: Web UI 模式（推荐）
 
 ```bash
 cd /你的工作空间
-#5002端口可选，可定义任何端口，如果你希望 agent开发网站之类的需要暴露端口浏览的项目，使用该选项，并告诉 agent 使用该端口进行网站部署。
+# XXXX 为可选端口，用于 agent 开发网页时暴露端口（如 5002）
+docker run -d --name mla \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 \
+  -p 9641:9641 \
+  -p 4242:4242 \
+  -p 5002:5002 \
+  chenglinhku/mlav3:latest webui && docker logs -f mla
+```
+
+打开浏览器：http://localhost:9641 设置配置文件
+然后打开浏览器：`http://localhost:4242`
+
+默认用户名 user
+默认密码 password
+
+
+
+<p align="center">
+  <img src="assets/web_ui.png" alt="Paper Generation Demo 2" width="800">
+</p>
+
+### 方式 B: CLI 模式
+
+```bash
+cd /你的工作空间
+# XXXX 为可选端口，用于 agent 开发网页时暴露端口（如 5002）
 docker run -it --rm \
   -e HOST_PWD=$(pwd) \
   -v $(pwd):/workspace$(pwd) \
@@ -107,26 +141,40 @@ docker run -it --rm \
   -p 8002:8002 \
   -p 9641:9641 \
   -p 5002:5002 \
-  chenglinhku/mla:latest \
-  cli
+  chenglinhku/mlav3:latest cli
 ```
 
-windows用户建议使用 docker，目前 win 版本还存在较多问题:
-windows用户目前无法用文件路径管理，得自己编写your_conversaion_id，不同your_conversaion_id维护不同的记忆，每次进入相同 id 将会进入相同对话。
+**Windows 用户：**
+
+Windows 用户建议使用 Docker。目前需要自己管理 conversation ID，不同的 conversation ID 维护不同的记忆。
 如有 bug 欢迎提交 issue。
-```bash
-cd /你的工作空间
-#5002端口可选，可定义任何端口，如果你希望 agent开发网站之类的需要暴露端口浏览的项目，使用该选项，并告诉 agent 使用该端口进行网站部署。
- docker run -it --rm `
-  -e HOST_PWD="/{your_conversaion_id}" `
-  -v "${PWD}:/workspace/{your_conversaion_id}" `
-   -v "${HOME}\.mla_v3:/root/mla_v3" `
- -v mla-config:/mla_config `
+
+```powershell
+# CLI 模式 (PowerShell)
+docker run -it --rm `
+  -e HOST_PWD="/{your_conversation_id}" `
+  -v "${PWD}:/workspace/{your_conversation_id}" `
+  -v "${HOME}\.mla_v3:/root/mla_v3" `
+  -v mla-config:/mla_config `
   -p 8002:8002 `
- -p 9641:9641 `
+  -p 9641:9641 `
   -p 5002:5002 `
-  chenglinhku/mla:latest `
- cli
+  chenglinhku/mlav3:latest cli
+
+# Web UI 模式 (PowerShell)
+docker run -d --name mla-webui `
+  -e HOST_PWD="/{your_conversation_id}" `
+  -v "${PWD}:/workspace/{your_conversation_id}" `
+  -v "${HOME}\.mla_v3:/root/mla_v3" `
+  -v mla-config:/mla_config `
+  -p 8002:8002 `
+  -p 9641:9641 `
+  -p 4242:4242 `
+  -p 5002:5002 `
+  chenglinhku/mlav3:latest webui
+
+# 然后打开浏览器：http://localhost:4242
+# 查看日志：docker logs -f mla-webui
 ```
 
 **4. 配置 API Key**

@@ -39,7 +39,10 @@ The default configuration in this repository is a **research-oriented semi-speci
 
 ### Update
 
-- support gemini api key from google ai studio now. Please See the gemini config in dir.
+- support web_ui and qwen api. Also fix some problem when using third part oepnai format api. please using latest chenglinhku/mlav3 docker image and see the example configs.
+
+- support gemini api key from google ai studio now. Please See the gemini config in dir. 2025/12/31
+
 
 Attention: Current coding task only support python project. Other language may supported later. In old version execute_command only support safe command like cd or grep，now it include every commands including rm. Please try to use it in docker mode if your task may edit system file.
 
@@ -87,14 +90,41 @@ MLA handles the entire research workflow - from literature search and experiment
 **2. Pull Image**
 
 ```bash
-docker pull chenglinhku/mla:latest
+docker pull chenglinhku/mlav3:latest
 ```
 
-**3. Start CLI**
+**3. Choose Your Mode**
+
+### Option A: Web UI Mode (Recommended)
+open localhost:9641 to set keys and base url.
 
 ```bash
 cd /your/workspace
-#5002 is a port optional. If you want to agent dev a web or something need expose a port. Please Use it And talk to agent using this port for dev.
+# XXXX is optional port for agent web development (replace with your port like 5002)
+docker run -d --name mla \
+  -e HOST_PWD=$(pwd) \
+  -v $(pwd):/workspace$(pwd) \
+  -v ~/.mla_v3:/root/mla_v3 \
+  -v mla-config:/mla_config \
+  -p 8002:8002 \
+  -p 9641:9641 \
+  -p 4242:4242 \
+  -p 5002:5002 \
+  chenglinhku/mlav3:latest webui && docker logs -f mla
+```
+
+Then open browser: `http://localhost:4242`
+default username：user defaultpassword：password
+
+<p align="center">
+  <img src="assets/web_ui.png" alt="Paper Generation Demo 2" width="800">
+</p>
+
+### Option B: CLI Mode
+
+```bash
+cd /your/workspace
+# XXXX is optional port for agent web development (replace with your port like 5002)
 docker run -it --rm \
   -e HOST_PWD=$(pwd) \
   -v $(pwd):/workspace$(pwd) \
@@ -103,24 +133,39 @@ docker run -it --rm \
   -p 8002:8002 \
   -p 9641:9641 \
   -p 5002:5002 \
-  chenglinhku/mla:latest \
-  cli
+  chenglinhku/mlav3:latest cli
 ```
 
-windows:
-windows user need to manage different conversation id(task id) by self. Different task id will keep different memory.
-```bash
-#5002 is a port optional. If you want to agent dev a web or something need expose a port. Please Use it And talk to agent using this port for dev.
- docker run -it --rm `
-  -e HOST_PWD="/{your_conversaion_id}" `
-  -v "${PWD}:/workspace/{your_conversaion_id}" `
-   -v "${HOME}\.mla_v3:/root/mla_v3" `
- -v mla-config:/mla_config `
+**Windows Users:**
+
+Windows users need to manage conversation IDs manually. Different task IDs maintain different memories.
+
+```powershell
+# CLI Mode (PowerShell)
+docker run -it --rm `
+  -e HOST_PWD="/{your_conversation_id}" `
+  -v "${PWD}:/workspace/{your_conversation_id}" `
+  -v "${HOME}\.mla_v3:/root/mla_v3" `
+  -v mla-config:/mla_config `
   -p 8002:8002 `
- -p 9641:9641 `
+  -p 9641:9641 `
   -p 5002:5002 `
-  chenglinhku/mla:latest `
- cli
+  chenglinhku/mlav3:latest cli
+
+# Web UI Mode (PowerShell)
+docker run -d --name mla-webui `
+  -e HOST_PWD="/{your_conversation_id}" `
+  -v "${PWD}:/workspace/{your_conversation_id}" `
+  -v "${HOME}\.mla_v3:/root/mla_v3" `
+  -v mla-config:/mla_config `
+  -p 8002:8002 `
+  -p 9641:9641 `
+  -p 4242:4242 `
+  -p 5002:5002 `
+  chenglinhku/mlav3:latest webui
+
+# Then open browser: http://localhost:4242
+# View logs: docker logs -f mla-webui
 ```
 
 **4. Configure API Key**
