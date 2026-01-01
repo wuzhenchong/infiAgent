@@ -39,6 +39,11 @@ The default configuration in this repository is a **research-oriented semi-speci
 
 ### Update
 
+- Install and how use vedio please click <a href="https://www.bilibili.com/video/BV142vQB2EDu/?share_source=copy_web&vd_source=8f099df5d40b73e936381e57d7fc05aa
+">infiagent:全自动写作工具</a>
+
+- fix some bugs about reference manage, Please clone latest repo or pull latest docker image: chenglinhku/mlav3.
+
 - support web_ui and qwen api. Also fix some problem when using third part oepnai format api. please using latest chenglinhku/mlav3 docker image and see the example configs.
 
 - support gemini api key from google ai studio now. Please See the gemini config in dir. 2025/12/31
@@ -82,7 +87,9 @@ MLA handles the entire research workflow - from literature search and experiment
 ## 🚀 Quick Start
 
 ### Vedio of Docker Mode:
-[![](https://bb-embed.herokuapp.com/embed?v=BV1jS4y1w7SW)](https://player.bilibili.com/player.html?isOutside=true&aid=115819346593080&bvid=BV142vQB2EDu&cid=35122512843)
+
+<a href="https://www.bilibili.com/video/BV142vQB2EDu/?share_source=copy_web&vd_source=8f099df5d40b73e936381e57d7fc05aa
+">infiagent:全自动写作工具</a>
 
 ### Option 1: Docker (Recommended - No Python Required)
 
