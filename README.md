@@ -80,6 +80,9 @@ MLA handles the entire research workflow - from literature search and experiment
 ---
 
 ## 🚀 Quick Start
+Vedio Docker Mode:
+
+<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=115819346593080&bvid=BV142vQB2EDu&cid=35122512843&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>
 
 ### Option 1: Docker (Recommended - No Python Required)
 
