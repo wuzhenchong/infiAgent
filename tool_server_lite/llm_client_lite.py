@@ -51,6 +51,9 @@ class LLMClientLite:
         if not os.path.exists(llm_config_path):
             raise FileNotFoundError(f"LLM配置文件不存在: {llm_config_path}")
         
+        # 保存配置文件路径（用于后续可能的重载）
+        self.config_path = llm_config_path
+        
         with open(llm_config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
         
@@ -73,6 +76,40 @@ class LLMClientLite:
         # 配置LiteLLM
         litellm.set_verbose = False
         litellm.drop_params = True
+        
+        print(f"✅ LLM客户端配置已加载: {llm_config_path}")
+    
+    def reload_config(self):
+        """
+        重新加载配置文件
+        
+        用于在运行时更新配置而无需重启服务
+        """
+        print(f"🔄 重新加载配置文件: {self.config_path}")
+        
+        if not os.path.exists(self.config_path):
+            raise FileNotFoundError(f"配置文件不存在: {self.config_path}")
+        
+        with open(self.config_path, 'r', encoding='utf-8') as f:
+            self.config = yaml.safe_load(f)
+        
+        # 更新配置
+        self.base_url = self.config.get("base_url", "")
+        self.api_key = self.config.get("api_key", "")
+        self.models = self.config.get("models", [])
+        self.figure_models = self.config.get("figure_models", [])
+        self.compressor_models = self.config.get("compressor_models", [])
+        self.read_figure_models = self.config.get("read_figure_models", [])
+        self.temperature = self.config.get("temperature", 0)
+        self.max_tokens = self.config.get("max_tokens", 0)
+        
+        if not self.api_key:
+            raise ValueError("未配置API密钥")
+        
+        if not self.models:
+            raise ValueError("未配置可用模型列表")
+        
+        print(f"✅ 配置已重新加载")
     
     def vision_query(
         self,
@@ -169,6 +206,10 @@ class LLMClientLite:
             
         Returns:
             图片的 base64 数据 URL（格式：data:image/png;base64,...）或 HTTP URL
+            
+        Note:
+            - OpenRouter: 使用 chat.completions + modalities
+            - 其他 API: 使用 litellm.image_generation()
         """
         if model is None:
             if self.figure_models:
@@ -179,26 +220,33 @@ class LLMClientLite:
                 model = "dall-e-3"
         
         try:
-            # 判断使用哪种 API（通过 base_url 检测）
-            # OpenRouter: 使用 chat.completions + modalities
-            # 官方 API (gemini/, openai/): 使用 image_generation
+            print(f"[INFO] 调用图片生成 API: {model}")
+            if self.base_url:
+                print(f"[INFO] 使用自定义端点: {self.base_url}")
             
+            # 判断是否是 OpenRouter
             is_openrouter = self.base_url and 'openrouter' in self.base_url.lower()
             
             if is_openrouter:
-                # OpenRouter: 使用 OpenAI SDK 的 chat completion + modalities
+                # OpenRouter 特殊处理：使用 chat.completions + modalities
                 from openai import OpenAI
+                
+                print(f"[INFO] 使用 OpenRouter 图片生成方式")
                 
                 client = OpenAI(
                     base_url=self.base_url,
-                    api_key=self.api_key
+                    api_key=self.api_key,
                 )
                 
-                print(f"[INFO] 调用 OpenRouter 图片生成: {model}")
-                
+                # 使用 chat.completions API
                 response = client.chat.completions.create(
                     model=model,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
                     extra_body={"modalities": ["image", "text"]}
                 )
                 
@@ -211,32 +259,39 @@ class LLMClientLite:
                             if image_url:
                                 print(f"[INFO] 成功生成图片: {image_url[:50]}...")
                                 return image_url
-                    raise Exception("图片数据格式异常")
+                    raise Exception("images 列表中未找到有效的图片 URL")
                 else:
-                    raise Exception(f"响应中没有图片。Message 属性: {dir(message)}")
+                    raise Exception(f"响应中没有 images 字段。Message 属性: {dir(message)}")
             
             else:
-                # 官方 API: 使用 litellm.image_generation
+                # 其他 API：使用标准的 image_generation
                 from litellm import image_generation
-                import os
                 
-                # 为官方 API 设置环境变量
-                if model.startswith('gemini/'):
-                    os.environ['GEMINI_API_KEY'] = self.api_key
-                elif model.startswith('openai/') or model in ['dall-e-2', 'dall-e-3']:
-                    os.environ['OPENAI_API_KEY'] = self.api_key
+                print(f"[INFO] 使用标准 image_generation() 方式")
                 
-                print(f"[INFO] 调用官方 API 图片生成: {model}")
+                # 构建参数
+                kwargs = {
+                    "model": model,
+                    "prompt": prompt,
+                    "api_key": self.api_key,
+                }
                 
-                response = image_generation(model=model, prompt=prompt)
+                # 只有在有自定义 base_url 时才添加 api_base 参数
+                if self.base_url and self.base_url.strip():
+                    kwargs["api_base"] = self.base_url
+                
+                # 调用 litellm.image_generation
+                response = image_generation(**kwargs)
                 
                 # 解析响应
                 if response.data and len(response.data) > 0:
                     first_image = response.data[0]
                     
+                    # 优先返回 URL
                     if hasattr(first_image, 'url') and first_image.url:
                         print(f"[INFO] 成功生成图片: {first_image.url[:100]}...")
                         return first_image.url
+                    # 其次返回 base64
                     elif hasattr(first_image, 'b64_json') and first_image.b64_json:
                         data_url = f"data:image/png;base64,{first_image.b64_json}"
                         print(f"[INFO] 成功生成图片（base64），长度: {len(data_url)}")
@@ -413,21 +468,69 @@ class LLMClientLite:
             raise Exception(f"调用LLM文本分析API失败: {str(e)}")
 
 
-# 全局单例（延迟初始化）
+# 全局单例（延迟初始化，支持配置文件热重载）
 _client_instance: Optional[LLMClientLite] = None
+_config_file_path: Optional[str] = None
+_config_file_mtime: Optional[float] = None
 
 
-def get_llm_client() -> LLMClientLite:
+def get_llm_client(force_reload: bool = False) -> LLMClientLite:
     """
-    获取LLM客户端单例
+    获取LLM客户端单例（支持配置文件热重载）
+    
+    Args:
+        force_reload: 是否强制重新加载配置
     
     Returns:
         LLMClientLite实例
+        
+    Note:
+        - 自动检测配置文件修改时间，如果配置文件被修改，会自动重新加载
+        - 也可以通过 force_reload=True 强制重新加载
     """
-    global _client_instance
-    if _client_instance is None:
+    global _client_instance, _config_file_path, _config_file_mtime
+    
+    # 确定配置文件路径
+    if _config_file_path is None:
+        current_dir = Path(__file__).parent
+        _config_file_path = str(current_dir.parent / "config" / "run_env_config" / "llm_config.yaml")
+    
+    # 检查配置文件是否存在
+    if not os.path.exists(_config_file_path):
+        if _client_instance is None:
+            raise FileNotFoundError(f"配置文件不存在: {_config_file_path}")
+        # 配置文件不存在但已有实例，返回现有实例
+        return _client_instance
+    
+    # 获取当前配置文件的修改时间
+    current_mtime = os.path.getmtime(_config_file_path)
+    
+    # 判断是否需要重新加载
+    need_reload = (
+        force_reload or 
+        _client_instance is None or 
+        _config_file_mtime is None or 
+        current_mtime != _config_file_mtime
+    )
+    
+    if need_reload:
+        if _config_file_mtime is not None and current_mtime != _config_file_mtime:
+            print(f"🔄 检测到配置文件变化，重新加载配置...")
+        
         _client_instance = LLMClientLite()
+        _config_file_mtime = current_mtime
+    
     return _client_instance
+
+
+def reload_llm_client() -> LLMClientLite:
+    """
+    强制重新加载LLM客户端配置
+    
+    Returns:
+        重新加载后的LLMClientLite实例
+    """
+    return get_llm_client(force_reload=True)
 
 
 if __name__ == "__main__":
