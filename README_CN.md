@@ -41,16 +41,20 @@
 
 ### 动态
 
-- 上传了视频教程，点击：<a href="https://www.bilibili.com/video/BV142vQB2EDu/?share_source=copy_web&vd_source=8f099df5d40b73e936381e57d7fc05aa
+如果你在最新更新日期前拉取镜像或者代码，请参考修复的问题，重新拉取镜像和代码。
+
+- [2026/01/03] 优化 litellm 原生重试机制，通过提醒调用错误增加小模型调用成功率；增加链接超时检测机制，减少任务中断可能性。
+
+- [2026/01/02] 上传了视频教程，点击：<a href="https://www.bilibili.com/video/BV142vQB2EDu/?share_source=copy_web&vd_source=8f099df5d40b73e936381e57d7fc05aa
 ">infiagent:全自动写作工具</a>
 
-- 修复了文献管理工具的部分 bug，请更新最新代码或者拉取最近镜像 chenglinhku/mlav3
+- [2026/01/02] 修复了文献管理工具的部分 bug，请更新最新代码或者拉取最近镜像 chenglinhku/mlav3
 
-- 现已支持web ui多用户模式。拉取最新镜像网chenglinhku/mlav3进行体验，webui目前属测试阶段存在不稳定因素，最新镜像同时接收cli模式，详见quickstart教程
+- [2026/01/01] 现已支持web ui多用户模式。拉取最新镜像网chenglinhku/mlav3进行体验，webui目前属测试阶段存在不稳定因素，最新镜像同时接收cli模式，详见quickstart教程
 
-- 现已支持阿里云api包括qwen，适配绝大部分第三方中转站。配置详情请卡config文件夹对应的参考文件。
+- [2026/01/01] 现已支持阿里云api包括qwen，适配绝大部分第三方中转站。配置详情请卡config文件夹对应的参考文件。
 
-- 现在已支持 gemini api。重新拉取仓库，mla-tool-server restart，或者重新拉取 docker 即可生效。配置文件参考配置文件夹 gemini 开头的样板格式。2025/12/31
+- [2025/12/31] 现在已支持 gemini api。重新拉取仓库，mla-tool-server restart，或者重新拉取 docker 即可生效。配置文件参考配置文件夹 gemini 开头的样板格式。
 
 注意目前只支持 python 编程，早期版本execute_command只支持只读命令，目前已经支持所有命令（包括删除等危险命令），推荐在 docker 环境下使用。
 
