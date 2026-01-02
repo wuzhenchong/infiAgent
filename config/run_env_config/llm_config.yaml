@@ -1,13 +1,14 @@
 temperature: 0
 max_tokens: 0
-max_context_window: 200000
+max_context_window: 100000
 base_url: https://openrouter.ai/api/v1
-api_key: your_key_here
+api_key: sk-or-v1-REDACTED
 models:
-- openai/google/gemini-3-flash-preview
+- openai/openai/gpt-oss-20b
 figure_models:
 - google/gemini-3-pro-image-preview
 compressor_models:
-- openai/google/gemini-3-flash-preview
+- openai/openai/gpt-oss-20b
 read_figure_models:
 - openai/google/gemini-3-flash-preview
+
