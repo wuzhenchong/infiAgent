@@ -2325,6 +2325,9 @@ def get_agent_tree():
         if not username:
             return jsonify({"error": "User not authenticated"}), 401
         
+        # Get optional root_agent parameter
+        root_agent = request.args.get('root_agent', None)
+        
         # Load agent configurations
         from utils.config_loader import ConfigLoader
         config_loader = ConfigLoader('Default')
@@ -2337,10 +2340,12 @@ def get_agent_tree():
             if config.get("type") == "llm_call_agent":
                 level = config.get("level", 0)
                 available_tools = config.get("available_tools", [])
+                description = config.get("description", "")
                 
                 all_agents[name] = {
                     "name": name,
                     "level": level,
+                    "description": description,
                     "available_tools": available_tools,
                     "children": []  # Will be populated in second pass
                 }
@@ -2351,23 +2356,6 @@ def get_agent_tree():
             for tool in agent["available_tools"]:
                 if tool in all_agents:
                     agent["children"].append(tool)
-        
-        # Find root agents (agents that are not children of any other agent)
-        root_agents = []
-        all_children = set()
-        for agent in all_agents.values():
-            all_children.update(agent["children"])
-        
-        for name in all_agents.keys():
-            if name not in all_children:
-                root_agents.append(name)
-        
-        # If no root agents found, use highest level agents
-        if not root_agents:
-            max_level = max([agent["level"] for agent in all_agents.values()], default=0)
-            for name, agent in all_agents.items():
-                if agent["level"] == max_level:
-                    root_agents.append(name)
         
         # Build tree starting from root agents
         def build_tree_node(agent_name, visited=None):
@@ -2386,6 +2374,7 @@ def get_agent_tree():
             node = {
                 "name": agent["name"],
                 "level": agent["level"],
+                "description": agent["description"],
                 "children": []
             }
             
@@ -2396,6 +2385,41 @@ def get_agent_tree():
                     node["children"].append(child_node)
             
             return node
+        
+        # If root_agent is specified, build tree from that agent
+        if root_agent:
+            if root_agent not in all_agents:
+                return jsonify({"error": f"Agent '{root_agent}' not found"}), 404
+            
+            tree = build_tree_node(root_agent)
+            if tree:
+                return jsonify({
+                    "trees": [tree],
+                    "root_agent": root_agent,
+                    "all_agents": {name: {
+                        "level": agent["level"],
+                        "description": agent["description"]
+                    } for name, agent in all_agents.items()}
+                })
+            else:
+                return jsonify({"error": "Failed to build tree"}), 500
+        
+        # Otherwise, find root agents (agents that are not children of any other agent)
+        root_agents = []
+        all_children = set()
+        for agent in all_agents.values():
+            all_children.update(agent["children"])
+        
+        for name in all_agents.keys():
+            if name not in all_children:
+                root_agents.append(name)
+        
+        # If no root agents found, use highest level agents
+        if not root_agents:
+            max_level = max([agent["level"] for agent in all_agents.values()], default=0)
+            for name, agent in all_agents.items():
+                if agent["level"] == max_level:
+                    root_agents.append(name)
         
         # Build trees for all root agents
         trees = []
@@ -2414,7 +2438,8 @@ def get_agent_tree():
         return jsonify({
             "trees": trees,
             "all_agents": {name: {
-                "level": agent["level"]
+                "level": agent["level"],
+                "description": agent["description"]
             } for name, agent in all_agents.items()}
         })
     except Exception as e:
