@@ -7,7 +7,7 @@
 - 🎨 现代化的对话界面
 - 🤖 显示当前执行的 Agent（带头像）
 - 📂 显示 Task ID 和 Workspace 路径
-- 🧭 **可视化入口 Agent 选择器**：在 Task ID 左侧选择对话入口智能体，并实时展示该智能体为根的 Agent Tree（包含名称、层级和描述）
+- 🧭 **可视化入口 Agent 选择器**：在 Task ID 左侧选择对话入口智能体，并实时展示该智能体为根的 Agent Tree
 - 📊 实时流式输出（JSONL 事件流）
 - 🔔 **Human-in-Loop (HIL) 交互支持**：自动检测并响应 Agent 的人类交互任务
 - 💬 支持多行输入和 Enter 发送
@@ -137,7 +137,7 @@ flask-cors
 
 - **入口 Agent 选择**：
   - 在 Task ID 左侧有一个 **Select Agent** 按钮，默认入口 Agent 为 `alpha_agent`
-  - 点击后会弹出 Agent 选择面板，左侧展示所有可用 Agent 列表（包含名称、层级、描述），右侧展示以当前选中 Agent 作为根节点的 **Agent Tree**
+  - 点击后会弹出 Agent 选择面板，左侧展示所有可用 Agent 列表，右侧展示以当前选中 Agent 作为根节点的 **Agent Tree**
   - 你可以通过列表选择任意 Agent 作为本次对话的入口智能体，后续所有对话都会从该 Agent 开始编排调用
   - 选择结果会保存在浏览器本地（localStorage），刷新页面后仍会保持
 - **Agent 系统**：
