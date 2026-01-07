@@ -16,30 +16,6 @@
 
 ---
 
-## 📄 Paper
-
-This project is based on the following research paper:
-
-**InfiAgent: An Infinite-Horizon Framework for General-Purpose Autonomous Agents**  
-Chenglin Yu, Yuchen Wang, Songmiao Wang, Hongxia Yang, Ming Li  
-*arXiv preprint arXiv:2601.03204, 2026*
-
-**Paper:** [https://arxiv.org/abs/2601.03204](https://arxiv.org/abs/2601.03204)  
-**GitHub:** [https://github.com/ChenglinPoly/infiAgent](https://github.com/ChenglinPoly/infiAgent)
-
-### BibTeX Citation
-
-```bibtex
-@article{yu2026infiagent,
-  title={InfiAgent: An Infinite-Horizon Framework for General-Purpose Autonomous Agents},
-  author={Yu, Chenglin and Wang, Yuchen and Wang, Songmiao and Yang, Hongxia and Li, Ming},
-  journal={arXiv preprint arXiv:2601.03204},
-  year={2026}
-}
-```
-
----
-
 ## 🌟 Introduction
 
 **infiAgent Also called MLA (Multi-Level Agent)** is an agent framework designed for **unlimited runtime** without tool calling chaos or system crashes caused by cumulative task resources and conversation history. With MLA, you can build powerful general-purpose and semi-specialized agents simply by writing configuration files.
@@ -960,6 +936,21 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 ## 📄 License
 
  see [LICENSE](LICENSE) for details.
+
+---
+
+## 📄 Citation
+
+If you use InfiAgent in your research, please cite our paper:
+
+```bibtex
+@article{yu2026infiagent,
+  title={InfiAgent: An Infinite-Horizon Framework for General-Purpose Autonomous Agents},
+  author={Yu, Chenglin and Wang, Yuchen and Wang, Songmiao and Yang, Hongxia and Li, Ming},
+  journal={arXiv preprint arXiv:2601.03204},
+  year={2026}
+}
+```
 
 ---
 
