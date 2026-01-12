@@ -269,6 +269,7 @@ class ContextBuilder:
 
 要求：
 - 每个描述要简洁明了
+- 强调当前任务应该复用的历史工作，除非用户明确指示重新开始。
 {"- 优先详细介绍与当前任务相关的历史内容" if current_task else ""}
 - 总字符数控制在3000字以内
 - 优先使用用户的输入习惯语言进行输出。
@@ -280,7 +281,7 @@ class ContextBuilder:
         
         response = self.llm_client.chat(
             history=history_messages,
-            model=self.llm_client.models[0],
+            model=self.llm_client.compressor_models[0],  # 使用压缩专用模型
             system_prompt="你是一个专业的内容总结助手。请简洁明了地总结历史交互信息。",
             tool_list=[],  # 空列表表示不使用工具
             tool_choice="none"  # 明确表示不调用工具（总结任务）
@@ -382,7 +383,7 @@ Agent调用树数据：
 - 保留关键的agent_id、agent_name、level、status信息
 - 对于已完成的Agent，保留重要的final_output（可适当精简）
 - 对于运行中的Agent，保留关键的thinking（可适当精简）
-- 重点突出与当前Agent相关的信息
+- 重点突出与当前Agent相关的信息（包括可能用到的文件，可以复用的历史成果）
 - 总字符数控制在2000字以内
 - 优先使用用户的输入习惯语言进行输出
 - 直接输出总结内容文本，不需要任何标记，不要使用markdown格式"""
@@ -393,7 +394,7 @@ Agent调用树数据：
         
         response = self.llm_client.chat(
             history=messages,
-            model=self.llm_client.models[0],
+            model=self.llm_client.compressor_models[0],  # 使用压缩专用模型
             system_prompt="你是一个专业的内容总结助手。请简洁明了地总结Agent调用树信息。",
             tool_list=[],
             tool_choice="none"
