@@ -94,10 +94,7 @@ tools:
         task_input:
           type: "string"
           description: "具体的任务要求，应该提供一篇或多篇文章的地址，不要提供原文内容。并且提供具体的问题和你预期想要获得的答案形式或总结要点或分析方向等。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "审查过程的最大轮次，防止无限循环。可选。"
+        
       required: ["task_id", "task_input"]
 
 #https://en.wikipedia.org/wiki/keyword
@@ -136,10 +133,7 @@ tools:
         task_input:
           type: "string"
           description: "具体的搜索任务要求，可以是笼统的某一方面，或具体的关键词组"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "搜索过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
   get_data_from_google_scholar:
@@ -181,10 +175,7 @@ tools:
         task_input:
           type: "string"
           description: "具体的搜索任务要求，包括论文主题、关键词、数量要求等。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "搜索过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
 
@@ -227,10 +218,7 @@ tools:
         task_input:
           type: "string"
           description: "具体的搜索任务要求，包括论文主题、关键词、数量要求等。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "搜索过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
   get_data_from_web_search:
@@ -269,10 +257,7 @@ tools:
         task_input:
           type: "string"
           description: "具体的搜索任务要求，包括论文主题、关键词、数量要求等。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "搜索过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
 
@@ -396,52 +381,6 @@ tools:
   #         description: "处理过程的最大轮次，防止无限循环。可选。"
   #     required: ["task_id", "task_input"] 
 
-  target_to_coding_task_agent:
-    level: 1
-    type: llm_call_agent
-    available_tools:
-      - file_read
-      - file_write
-      - dir_list
-      - dir_create
-      - file_replace_lines
-      - reference_list
-      - reference_add
-      - reference_delete
-      - final_output
-    max_turns: 100
-    model_type: claude-3-7-sonnet-20250219
-    prompts:
-      agent_responsibility: |
-        你的职责是更具用户需求定制详细的代码计划和框架
-      agent_workflow: |
-        详细分析用户的意图，并根据意图编排使用你的工具完成任务。
-        例如，如果用户想要进行学术论文写作，则你应该参考下面的流程：
-        **参考流程:**
-          1. 分析给你的任务(提供的实验计划和idea）（基于任务的需求，提供的参考文件等（如果有）），确定任务的可行性，你可以在任务可行性显而易见不可行的情况下，输出 error，并给出拒绝任务的原因和修改建议。如果没有问题执行下一步。
-          2. 代码和实验计划你要进行再次理解，要通过高度抽象的方式，尽量简化实验难度，只需要确保思想符合即可，因为这是实验代码，不是生产代码，不需要考虑太多细节和严格按照最初实验要求。
-          3. 根据分析完成详细的全面的逻辑正确完善的实验计划到代码任务分解的方案，每个文件中所有可以调用的函数都需要给出详细的预期输入和输出，以及最后总体实验的调用方式。
-          **注意事项:**
-          1. 重要：你不是编程 ai，你只需要确保你的 task 分解足够细致，需求，输入输出足够明确，不需要进行编程！
-          2. 重要：你的实验编程计划应该对原来的实验进行高度抽象，确保使得代码任务尽可能简单。
-          3. 重要：你的编程任务应该完全明确其输入输出的格式和输入的类型，确保前后模块可以完美衔接。
-        如果是非学术任务，则应该自己安排流程。
-    name: "target_to_coding_task_agent"
-    description: "你的职责是更具用户需求定制详细的代码计划和框架"
-    parameters:
-      type: "object"
-      properties:
-        task_id:
-          type: "string"
-          description: "任务的唯一ID。"
-        task_input:
-          type: "string"
-          description: "详细的论文创意和实验计划，需要分解成编码任务。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "任务分解过程的最大轮次，防止无限循环。可选。"
-      required: ["task_id", "task_input"] 
 
   coding_task_agent:
     level: 1
@@ -450,17 +389,11 @@ tools:
       #- judge_agent
       - file_read
       - file_write
-      - execute_code
       - dir_list
       - dir_create
-      - pip_install
       - execute_command
       - file_replace_lines
-      - manage_code_process
       - human_in_loop
-      - reference_list
-      - reference_add
-      - reference_delete
       - final_output
       - browser_agent
     max_turns: 100
@@ -469,19 +402,16 @@ tools:
       agent_responsibility: |
         你的职责是根据一个详细的编码任务指示准确无误的完成要求。
       agent_workflow: |
-        **你的流程:**
-        1. 分析给你的编码任务（基于任务的需求，提供的参考文件等（如果有）），确定任务的可行性，你可以在任务可行性显而易见不可行的情况下，输出 error，并给出拒绝任务的原因和修改建议。如果没有问题执行下一步。
-        2. 检查是否已经存在已有的代码项目，如果已经存在实验代码或项目，则使用execute_command中的 grep，或者 file_read，dir_list来探索整个项目，并对项目进行总结和预览。
-        3. 完成交给你的编程任务，并且在if main中进行所有功能的最小单元测试，测试通过后才可最终输出。
-        **注意事项:**
-        1. 如果没有用户的明确需求，作为编码任务，你应该都在 code_run 目录下创建文件（包括所有代码，todolist 和 readme 文件）,注意每次创建自己的文件前检查是否存在别人的文件，不要覆盖，有些别人已经写过的可以复用的功能文件你可以复用。
-        2. 执行代码时，应该使用 execute_code 工具，并给出文件的相对路径。注意execute_code的执行逻辑，再运行代码前，你应该检查是否需要安装一些额外的包，并执行安装。
-        3. 代码中关于文件的读取，写入这些操作，应该考虑到execute_code的执行逻辑（默认在code_run目录下执行任何位置的代码），确保文件的读取和写入操作是正确的。
-        4. 执行代码时，你应该使用可以跑通的最小规模进行测试！你只需要确保最后的整体功能测试没问题即可，你可以自己选择分阶段测试还是一次性测试。
-        5. 如果是需要挂起执行的例如flask 网站任务，使用后台执行并定向输出文件。检查输出文件进行 debug。同时及时管理运行进程进行终止。
-        6. 网站等视觉任务！一定要在挂起运行后指导人类进行审查！如果需要人类交互（例如让人类反馈网站页面结果或者进一步修改，这种视觉任务 judge agent 无法完成，请交给人类反馈），使用 human_in_loop 工具，并给出人类交互的提示词。
-        7. 确定完成任务后，必须关闭所有遗留进程！
-        8. 简单的页面观察和截图任务也可以交给browser_agent
+        详细分析任务，基于给你的材料完成对应的编程任务
+        1. 一般来说你可能已经在一个项目中，不要重复找轮子。
+        2. 了解你这个模块可能要用到的其他代码文件，和可能涉及的其他代码文件，明确你要写的代码。
+        3. 基于充足上下文完成编程任务。
+        4. 对你的模块进行测试，确保你的任务完美完成。
+        注意事项：
+        1. 网站运行类的编程任务请在后台挂起运行并将输出重定向到文件。并且在输出前询问人类部署的端口号。
+        2. 网站等视觉任务！一定要在挂起运行后指导人类进行审查！如果需要人类交互（例如让人类反馈网站页面结果或者进一步修改，这种视觉任务 judge agent 无法完成，请交给人类反馈），使用 human_in_loop 工具，并给出人类交互的提示词。
+        3. 简单的页面观察和截图任务也可以交给browser_agent
+        4. 确定完成任务后，必须关闭所有遗留进程！
     name: "coding_task_agent"
     description: "根据详细的编码任务指示，准确完成编程要求，包括代码编写、测试和文档生成。"
     parameters:
@@ -493,10 +423,7 @@ tools:
         task_input:
           type: "string"
           description: "详细的编码任务指示和要求。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "编码过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
   move_data_to_clean_directory:
@@ -533,54 +460,9 @@ tools:
         task_input:
           type: "string"
           description: "文件移动的具体要求，包括源文件位置和目标文件夹。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "文件移动过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
-  create_figures_python_agent:
-    level: 1
-    type: llm_call_agent
-    available_tools:
-      # - judge_agent
-      - dir_list
-      - dir_create
-      - file_read
-      - file_write
-      - pip_install
-      - execute_code
-      - reference_list
-      - reference_add
-      - reference_delete
-      - final_output
-    max_turns: 100
-    model_type: claude-3-7-sonnet-20250219
-    prompts:
-      agent_responsibility: |
-        你的职责是将用户要求的各种 python作图实现，并输出图片。
-      agent_workflow: |
-        **你的流程:**
-        1. 你将会得到详细的作图需求，你应该根据需求，理解作图意图，如果你对数据不了解，可以对数据进行读取，甚至读取产生数据的相关代码。
-        2. 使用一个 python 文件在相同目录下进行作图，但是运行时你需要搞清楚，运行工具默认在/code_run 目录下。图片必须是英文的。
-        3. 应该使用一个 json 文件或者 md 文件对所做的每一张图（文件名：描述）进行详细描述，并给出文件地址。描述应该经可能详细，比如发现，意义等，有助于后期写作。
-    name: "create_figures_python_agent"
-    description: "根据用户要求实现Python作图功能，生成图片并提供详细描述文档。"
-    parameters:
-      type: "object"
-      properties:
-        task_id:
-          type: "string"
-          description: "任务的唯一ID。"
-        task_input:
-          type: "string"
-          description: "详细的作图需求和要求,所需的数据和产生数据的相关代码。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "作图过程的最大轮次，防止无限循环。可选。"
-      required: ["task_id", "task_input"]
-  
 
   create_figures_by_ai:
     level: 1
@@ -615,10 +497,7 @@ tools:
         task_input:
           type: "string"
           description: "生成图片的提示词"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "搜索过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
 
@@ -658,10 +537,7 @@ tools:
         task_input:
           type: "string"
           description: "要读的图片地址，你的需求，问题和格式"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "搜索过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
   sub_part_editor_agent:
@@ -689,8 +565,6 @@ tools:
       agent_workflow: |
         详细分析用户的意图，并根据意图编排使用你的工具完成任务。
         例如，如果用户想要进行学术论文写作，则你应该参考下面的流程：
-        重要！！！：
-        学术写作禁止使用短段落，拒绝分点，使用自然的长短落进行叙述！
         **参考流程:**
         **重要！！**不要不基于已有材料乱编，特别是参考文献，应该使用阅读 answer_from_papers  或者 google_scholar_search 工具来获取参考文献。文章作者应该真实！！abstract，introduction，conclusion 部分一般没有子标题！注意遵守常见写作格式！！
         引用图片时应该仔细思考图片位置，如果在同层目录，则直接引用即可，不用带父文件夹名！！
@@ -712,10 +586,7 @@ tools:
         task_input:
           type: "string"
           description: "要撰写的章节部分、已完成的其他部分信息、相关材料位置等。"
-        max_turns:
-          type: "integer"
-          default: 100
-          description: "撰写过程的最大轮次，防止无限循环。可选。"
+
       required: ["task_id", "task_input"] 
 
   # md_to_document_agent:

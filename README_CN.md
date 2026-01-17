@@ -43,6 +43,20 @@
 
 如果你在最新更新日期前拉取镜像或者代码，请参考修复的问题，重新拉取镜像和代码。
 
+- [2026/01/17] 我们推出新的配置文件open cowork，得到类似anthropic 公司 cowork 工具的电脑工作助手。在进入你指定的文件夹后，实现包括但不限于帮你整理文件夹，制作 ppt，整理各种格式的账单发票，深度调研，编写项目代码等。仍然基于 infiagent 架构的长程性能，和相同文件夹下的无限记忆。目前仅支持 cli 和 docker cli 模式。具体可查看演示视频。
+
+**Open Cowork 演示视频：**
+
+<p align="center">
+  <strong>桌面整理 & 文件管理</strong><br>
+  <video src="https://github.com/user-attachments/assets/org_dektop.mp4" width="800" controls></video>
+</p>
+
+<p align="center">
+  <strong>PPT 制作</strong><br>
+  <video src="https://github.com/user-attachments/assets/ppt.mp4" width="800" controls></video>
+</p>
+
 - [2026/01/13] cli模式下新增api欠费网络中断等意外情况的断点续跑功能。（原先手动中断/续跑功能保留）。统一/resume唤起。
 
 - [2026/01/08] 我们的论文 "[InfiAgent: An Infinite-Horizon Framework for General-Purpose Autonomous Agents](https://arxiv.org/abs/2601.03204)" 发布
