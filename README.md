@@ -47,12 +47,13 @@ If you pulled the image or code before the latest update date, please refer to t
 
 <p align="center">
   <strong>Desktop Organization & File Management</strong><br>
-  <video src="https://github.com/user-attachments/assets/org_dektop.mp4" width="800" controls></video>
+  <video src="assets/org_dektop.mp4" width="800" controls></video>
 </p>
+
 
 <p align="center">
   <strong>PowerPoint Creation</strong><br>
-  <video src="https://github.com/user-attachments/assets/ppt.mp4" width="800" controls></video>
+  <video src="assets/ppt.mp4" width="800" controls></video>
 </p>
 
 - [2026/01/13] Supports breakpoint recovery for program errors (the original Ctrl+C resume function is retained). Please access the resume function using your CLI version and type /resume.
