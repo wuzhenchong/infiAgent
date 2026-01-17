@@ -49,11 +49,10 @@ If you pulled the image or code before the latest update date, please refer to t
   [![Desktop Organization & File Management](https://img.youtube.com/vi/_n3DJ5FnjHw/hqdefault.jpg)](https://www.youtube.com/watch?v=_n3DJ5FnjHw)
 
 
+  [![PowerPoint Creation](https://img.youtube.com/vi/uuxAvCLIX9M/hqdefault.jpg)](https://www.youtube.com/watch?v=uuxAvCLIX9M)
 
-<p align="center">
-  <strong>PowerPoint Creation</strong><br>
-  <video src="assets/ppt.mp4" width="800" controls></video>
-</p>
+
+
 
 - [2026/01/13] Supports breakpoint recovery for program errors (the original Ctrl+C resume function is retained). Please access the resume function using your CLI version and type /resume.
 
