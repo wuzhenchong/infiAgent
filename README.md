@@ -45,11 +45,9 @@ If you pulled the image or code before the latest update date, please refer to t
 
 **Open Cowork Demo Videos:**
 
-<p align="center">
-  <strong>Desktop Organization & File Management</strong><br>
+
   [![Desktop Organization & File Management](https://img.youtube.com/vi/_n3DJ5FnjHw/hqdefault.jpg)](https://www.youtube.com/watch?v=_n3DJ5FnjHw)
-  
-</p>
+
 
 
 <p align="center">
