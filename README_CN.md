@@ -143,6 +143,7 @@ docker pull chenglinhku/mlav3:latest
 **3. 选择模式**
 
 ### 方式 A: Web UI 模式（推荐）
+WEB UI不支持默认配置文件以外的配置文件，请使用 CLI 模式如果希望使用 Cowork 功能
 
 ```bash
 cd /你的工作空间
