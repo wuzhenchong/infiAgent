@@ -327,7 +327,7 @@ tools:
           description: "要问的问题，例如'这是什么？'或'请描述图片中的内容'。不指定则默认描述图片内容。"
         save_path:
           type: "string"
-          description: "必选，保存结果的相对路径。请保存在 temp/answer_figuers目录中。"
+          description: "必选，保存结果的相对路径,保存为纯文本文件 md或者 txt。请保存在 temp/answer_figuers目录中。"
         # model:
         #   type: "string"
         #   description: "要使用的模型名称，可选。不指定则使用配置中的默认模型。"
@@ -975,13 +975,13 @@ tools:
     level: 0
     type: tool_call_agent
     name: "execute_command"
-    description: "执行指定命令行命令（只允许 ls、cat、grep、pwd 等只读指令，不允许删除、修改等危险操作）。可以指定工作目录。"
+    description: "执行指定命令行命令,注意谨慎使用删除命令，可以用复制到.trash目录代替删除效果以便恢复"
     parameters:
       type: "object"
       properties:
         command:
           type: "string"
-          description: "要执行的 shell 命令，例如 'ls -la' 或 'pwd'。仅限白名单中的安全命令。"
+          description: "执行指定命令行命令,注意谨慎使用删除命令，可以用复制到.trash目录代替删除效果以便恢复"
         working_dir:
           type: "string"
           default: "."
