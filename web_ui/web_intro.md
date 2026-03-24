@@ -66,10 +66,7 @@ If you need to delete a task and all its data:
 
 ## Video Demonstration
 
-<video width="100%" controls>
-  <source src="web_intro.mp4" type="video/mp4">
-  Your browser does not support video playback.
-</video>
+The walkthrough video is no longer stored in git so the repository stays lightweight.
 
 ## Notes
 
@@ -77,4 +74,3 @@ If you need to delete a task and all its data:
 - Chat history is automatically saved and can be restored after page refresh
 - The file browser synchronizes file changes in the workspace in real-time
 - Supports multi-task switching by changing the Task ID and clicking Confirm
-

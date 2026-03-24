@@ -159,6 +159,39 @@ class SDKObservabilityTests(unittest.TestCase):
         instance = _FakeAgentExecutor.instances[-1]
         self.assertTrue(instance.stream_llm_tokens)
 
+    def test_llm_stream_callback_maps_reset_events_and_attempts(self):
+        agent = object.__new__(AgentExecutor)
+        emitted = []
+        agent._emit_sdk_stream_event = lambda event_type, payload: emitted.append({
+            "event_type": event_type,
+            "payload": payload,
+        })
+
+        callback = AgentExecutor._build_llm_stream_callback(
+            agent,
+            stream_group="llm",
+            agent_name="alpha_agent",
+            model="demo-model",
+        )
+        callback({
+            "kind": "reset",
+            "model": "demo-model",
+            "attempt": 2,
+            "reason": "retry",
+        })
+        callback({
+            "kind": "content",
+            "model": "demo-model",
+            "attempt": 2,
+            "text": "hello",
+        })
+
+        self.assertEqual(emitted[0]["event_type"], "run.llm.reset")
+        self.assertEqual(emitted[0]["payload"]["attempt"], 2)
+        self.assertEqual(emitted[0]["payload"]["reason"], "retry")
+        self.assertEqual(emitted[1]["event_type"], "run.llm.token")
+        self.assertEqual(emitted[1]["payload"]["attempt"], 2)
+
     def test_run_can_override_max_turns_via_sdk_parameter(self):
         root = (self.base / "sdk_max_turns_root").resolve()
         task_id = str((self.base / "task_with_max_turns").resolve())

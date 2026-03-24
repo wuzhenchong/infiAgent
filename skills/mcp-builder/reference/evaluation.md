@@ -564,7 +564,7 @@ python scripts/evaluation.py \
   -t stdio \
   -c python \
   -a github_mcp_server.py \
-  -e GITHUB_TOKEN=GITHUB_TOKEN_REDACTED \
+  -e GITHUB_TOKEN=ghp_xxx \
   -o github_eval_report.md \
   my_evaluation.xml
 ```

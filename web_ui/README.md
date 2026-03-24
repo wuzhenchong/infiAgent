@@ -108,9 +108,7 @@ flask-cors
 ## 使用说明
 
 <p align="center">
-  <video src="web_ui/web_intro.mp4" controls width="800">
-    Your browser does not support the video tag.
-  </video>
+  Web UI walkthrough video is distributed outside git to keep repository size under control.
 </p>
 
 ### 1. 设置 Task ID
