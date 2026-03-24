@@ -1,0 +1,1320 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Agent执行器 - 使用标准消息格式的核心执行逻辑
+历史动作通过 messages 数组传递（而非 system_prompt），支持多模态图片嵌入
+"""
+from typing import Any, Dict, List, Optional
+import sys
+import json
+import os
+import time
+import traceback
+from collections import OrderedDict
+
+# Windows兼容性：设置UTF-8编码
+try:
+    from utils.windows_compat import setup_console_encoding
+    setup_console_encoding()
+except ImportError:
+    pass
+
+from services.llm_client import SimpleLLMClient, ChatMessage
+from core.context_builder import ContextBuilder
+from core.tool_executor import ToolExecutor
+from utils.conversation_storage import ConversationStorage
+from utils.event_emitter import get_event_emitter as get_jsonl_emitter
+from utils.skill_loader import reset_skill_loader
+from utils.user_paths import apply_runtime_env_defaults, get_runtime_settings
+from utils.runtime_control import (
+    is_task_running,
+    pop_fresh_request,
+    register_running_task,
+    request_fresh,
+    unregister_running_task,
+)
+from utils.task_runtime import resume_task_with_fresh
+from tool_server_lite.registry import reload_runtime_registry
+from tool_server_lite.tools.code_tools import has_running_background_processes
+from utils.mcp_manager import get_mcp_tools, reload_mcp_tools
+
+from .agent_event_emitter import AgentEventEmitter
+from .event_handlers import ConsoleLogHandler, JsonlStreamHandler
+from .events import *
+from .runtime_exceptions import InfiAgentRunError
+from utils.windows_compat import safe_print
+
+
+class AgentExecutor:
+    """Agent执行器 - 正确的XML上下文架构"""
+    
+    def __init__(
+        self,
+        agent_name: str,
+        agent_config: Dict,
+        config_loader,
+        hierarchy_manager,
+        direct_tools: bool = False,
+        extra_event_handlers: Optional[List[Any]] = None,
+        exit_on_error: bool = True,
+        raise_on_error: bool = False,
+        stream_llm_tokens: bool = False,
+    ):
+        """初始化Agent执行器"""
+        self.agent_name = agent_name
+        self.agent_config = agent_config
+        self.config_loader = config_loader
+        self.hierarchy_manager = hierarchy_manager
+        self.direct_tools = direct_tools
+        self.extra_event_handlers = list(extra_event_handlers or [])
+        self.exit_on_error = bool(exit_on_error)
+        self.raise_on_error = bool(raise_on_error)
+        self.stream_llm_tokens = bool(stream_llm_tokens)
+        
+        self._setup_event_emitter()
+
+        # 从配置中提取信息
+        self.available_tools = list(agent_config.get("available_tools", []))
+        self.max_turns = self._resolve_max_turns()
+        requested_model = self._get_agent_model_preference("execution")
+        self._inject_mcp_tools()
+        
+        # 初始化LLM客户端
+        self.llm_client = SimpleLLMClient()
+        self.llm_client.set_tools_config(config_loader.all_tools)
+        
+        # 验证并调整模型
+        available_models = self.llm_client.models
+        final_model = self.llm_client.resolve_model("execution", requested_model)
+        is_fallback = False
+        if requested_model and requested_model not in available_models:
+            is_fallback = True
+        self.execution_model = final_model
+        self.model_type = final_model
+        
+        # 发送模型选择事件
+        self.event_emitter.dispatch(ModelSelectionEvent(
+            requested_model=requested_model,
+            final_model=final_model,
+            is_fallback=is_fallback
+        ))
+
+        # 初始化上下文构造器（负责完整上下文构建）
+        self.context_builder = ContextBuilder(
+            hierarchy_manager,
+            agent_config=agent_config,
+            config_loader=config_loader,
+            llm_client=self.llm_client,
+            max_context_window=self.llm_client.max_context_window
+        )
+        
+        # 初始化工具执行器
+        self.tool_executor = ToolExecutor(
+            config_loader,
+            hierarchy_manager,
+            direct_mode=direct_tools,
+            extra_event_handlers=self.extra_event_handlers,
+            exit_on_error=self.exit_on_error,
+            raise_on_error=self.raise_on_error,
+            stream_llm_tokens=self.stream_llm_tokens,
+        )
+        
+        # 初始化对话存储
+        self.conversation_storage = ConversationStorage()
+        
+        # Agent状态
+        self.agent_id = None
+        self.action_history = []  # 渲染用（会压缩）
+        self.action_history_fact = []  # 完整轨迹（不压缩）
+        self.execution_traces = []  # execution LLM 原生输出轨迹
+        self.thinking_traces = []  # thinking LLM 原生输出轨迹
+        self.pending_tools = []  # 待执行的工具（用于恢复）
+        self.latest_thinking = ""
+        self.first_thinking_done = False
+        runtime = get_runtime_settings()
+        self.action_window_steps = int(self.agent_config.get("action_window_steps") or runtime.get("action_window_steps", 30))
+        self.thinking_interval = int(self.agent_config.get("thinking_interval") or runtime.get("thinking_interval", self.action_window_steps))
+        self.fresh_enabled = runtime.get("fresh_enabled", False)
+        self.fresh_interval_sec = runtime.get("fresh_interval_sec", 0)
+        self.last_fresh_at = time.time()
+        self.tool_call_counter = 0
+        self.llm_turn_counter = 0  # LLM调用轮次计数器（用于消息分组）
+        self.current_task_id = None
+
+    def _get_agent_model_preference(self, category: str) -> Optional[str]:
+        field_map = {
+            "execution": "execution_model",
+            "thinking": "thinking_model",
+            "compressor": "compressor_model",
+            "image_generation": "image_generation_model",
+            "read_figure": "read_figure_model",
+        }
+        field = field_map.get(category, "execution_model")
+        value = self.agent_config.get(field)
+        if category == "execution" and not value:
+            value = self.agent_config.get("model_type")
+        return str(value or "").strip() or None
+
+    def _resolve_max_turns(self) -> int:
+        env_value = str(os.environ.get("MLA_MAX_TURNS", "") or "").strip()
+        if env_value:
+            try:
+                return max(1, int(env_value))
+            except Exception:
+                pass
+        return 100000
+
+    def _inject_mcp_tools(self):
+        """将 MCP 动态工具并入当前 Agent 的工具配置与可见工具列表。"""
+        try:
+            mcp_tools = get_mcp_tools(force_reload=False)
+            if not mcp_tools:
+                return
+            for tool_name, tool_config in mcp_tools.items():
+                self.config_loader.all_tools[tool_name] = tool_config
+                if tool_name not in self.available_tools:
+                    self.available_tools.append(tool_name)
+        except Exception:
+            pass
+
+    def _setup_event_emitter(self):
+        """初始化事件发射器并注册处理器"""
+        self.event_emitter = AgentEventEmitter()
+        self.event_emitter.register(ConsoleLogHandler())
+        for handler in self.extra_event_handlers:
+            self.event_emitter.register(handler)
+        
+        jsonl_emitter = get_jsonl_emitter()
+        if jsonl_emitter.enabled:
+            self.event_emitter.register(JsonlStreamHandler(enabled=True))
+
+    def _emit_sdk_stream_event(self, event_type: str, payload: Dict[str, Any]):
+        parts = str(event_type or "").split(".", 2)
+        normalized = {
+            "event_type": str(event_type or ""),
+            "phase": parts[0] if len(parts) > 0 else "",
+            "domain": parts[1] if len(parts) > 1 else "",
+            "action": parts[2] if len(parts) > 2 else "",
+            "payload": payload,
+        }
+        for handler in self.extra_event_handlers:
+            emitter = getattr(handler, "emit", None)
+            if not callable(emitter):
+                continue
+            try:
+                emitter(normalized)
+            except Exception:
+                pass
+    
+    def run(self, task_id: str, user_input: str) -> Dict:
+        """执行Agent任务"""
+
+        self.event_emitter.dispatch(AgentStartEvent(
+            agent_name=self.agent_name, 
+            task_input=user_input
+        ))        
+        # 存储 task_input 供压缩器使用
+        self.current_task_id = task_id
+        self.current_task_input = user_input
+        try:
+            try:
+                self.hierarchy_manager.set_runtime_metadata(
+                    agent_system=self.config_loader.agent_system_name,
+                    agent_name=self.agent_name,
+                    user_input=user_input,
+                )
+            except Exception:
+                pass
+
+            register_running_task(
+                task_id=task_id,
+                agent_name=self.agent_name,
+                user_input=user_input,
+                agent_system=self.config_loader.agent_system_name,
+            )
+
+            # Agent入栈
+            self.agent_id = self.hierarchy_manager.push_agent(self.agent_name, user_input)
+            self.tool_executor.set_agent_context(agent_id=self.agent_id, agent_name=self.agent_name)
+
+            # 尝试加载已有的对话历史
+            start_turn = self._load_state_from_storage(task_id)
+            
+            try:
+                # 首次thinking（初始规划）
+                if start_turn == 0 and not self.first_thinking_done:
+                    thinking_result = self._trigger_thinking(
+                        task_id, 
+                        user_input, 
+                        is_initial=True
+                    )
+                    if thinking_result:
+                        self.latest_thinking = thinking_result
+                        self.first_thinking_done = True
+                        self.hierarchy_manager.update_thinking(self.agent_id, thinking_result)
+                        self._save_state(task_id, user_input, 0)
+            except Exception as e:
+                return self._handle_execution_error(e)
+            
+            # 强制工具调用计数器
+            max_tool_try = 0
+
+            # 执行循环
+            for turn in range(start_turn, self.max_turns):
+                self.event_emitter.dispatch(CliDisplayEvent(
+                    message=f"\n--- 第 {turn + 1}/{self.max_turns} 轮执行 ---", 
+                    style='separator'
+                ))
+                
+                try:
+                    self._maybe_run_scheduled_fresh(task_id, user_input, turn)
+
+                    # 每轮开始前保存状态
+                    self._save_state(task_id, user_input, turn)
+
+                    # 检查并压缩历史动作（如果超过限制）
+                    self._compress_action_history_if_needed()
+
+                    # 构建系统提示词（不含历史动作，历史动作改由 messages 承载）
+                    full_system_prompt = self.context_builder.build_context(
+                        task_id,
+                        self.agent_id,
+                        self.agent_name,
+                        user_input,
+                        action_history=self.action_history,
+                        include_action_history=False  # 历史动作通过 messages 传递
+                    )
+                    
+                    # 从 action_history 构建标准 messages 数组
+                    messages = self._build_messages_from_action_history()
+                    
+                    # 调用LLM（使用标准 messages 格式）
+                    llm_response = self._execute_llm_call(full_system_prompt, messages, task_id=task_id)
+                    
+                    if llm_response.status != "success":
+                        error_result = {
+                            "status": "error",
+                            "output": "LLM调用失败",
+                            "error_information": llm_response.error_information
+                        }
+                        error_result = self._with_model_outputs(error_result)
+                        self.hierarchy_manager.pop_agent(self.agent_id, str(error_result))
+                        self.event_emitter.dispatch(AgentEndEvent(status='error', result=error_result))
+                        return error_result
+
+                    if not llm_response.tool_calls:
+                        # 强制工具调用机制
+
+                        if max_tool_try < 5:
+                            max_tool_try += 1
+                            self.event_emitter.dispatch(CliDisplayEvent(
+                                message=f"⚠️ LLM未调用工具，第{max_tool_try}/5次提醒", 
+                                style='warning'
+                            ))
+                            self.action_history.append({
+                                "_turn": self.llm_turn_counter,
+                                "tool_name": "_no_tool_call",
+                                "arguments": {},
+                                "result": {
+                                    "status": "error",
+                                    "output": f"第{max_tool_try}次：LLM未调用工具，请在下一轮中必须调用工具"
+                                },
+                                "assistant_content": llm_response.output or ""
+                            })
+                            self.llm_turn_counter += 1
+                            self._save_state(task_id, user_input, turn)
+                            continue
+                        else:
+                            # 5次后仍不调用，触发thinking并报错
+                            thinking_result = self._trigger_thinking(
+                                task_id, 
+                                user_input, 
+                                is_initial=False, 
+                                is_forced=True
+                            )
+                            error_output = thinking_result or "多次未调用工具"
+                            error_result = {
+                                "status": "error",
+                                "output": error_output,
+                                "error_information": "Agent拒绝调用工具"
+                            }
+                            error_result = self._with_model_outputs(error_result)
+                            self.hierarchy_manager.pop_agent(self.agent_id, str(error_result))
+                            self.event_emitter.dispatch(AgentEndEvent(status='error', result=error_result))
+                            self.event_emitter.dispatch(ThinkingFailEvent(agent_name=self.agent_name, error_message=f"[{self.agent_name}] 强制thinking: {thinking_result if thinking_result else '分析失败'}"))
+                            return error_result
+                    # 重置计数器（成功调用了工具）
+                    max_tool_try = 0
+
+                    # 提取本轮 LLM 输出的文本内容和推理内容（所有 tool_call 共享）
+                    current_assistant_content = llm_response.output or ""
+                    current_reasoning_content = llm_response.reasoning_content or ""
+                    current_llm_turn = self.llm_turn_counter
+
+                    # 执行所有工具调用
+                    for tool_call in llm_response.tool_calls:
+                        final_output_result = self._execute_tool_call(
+                            tool_call, task_id, user_input, turn,
+                            assistant_content=current_assistant_content,
+                            reasoning_content=current_reasoning_content,
+                            llm_turn=current_llm_turn
+                        )
+                        if final_output_result:
+                            final_output_result = self._with_model_outputs(final_output_result)
+                            self.event_emitter.dispatch(AgentEndEvent(status='success', result=final_output_result))
+                            self.hierarchy_manager.pop_agent(self.agent_id, final_output_result.get("output", ""))
+                            return final_output_result
+                    
+                    self.llm_turn_counter += 1
+                    
+                    counter_before = self.tool_call_counter - len(llm_response.tool_calls)
+
+                    # 检查是否该触发thinking（每 N 轮工具调用）
+                    # 用整除判断是否跨过了 thinking_interval 边界（避免多 tool_call 跳过边界值）
+                    crossed_boundary = (counter_before // self.thinking_interval) < (self.tool_call_counter // self.thinking_interval)
+                    if self.tool_call_counter > 0 and crossed_boundary:
+                        thinking_result = self._trigger_thinking(task_id, user_input, is_initial=False)
+                        if thinking_result:
+                            self.latest_thinking = thinking_result
+                            self.hierarchy_manager.update_thinking(self.agent_id, thinking_result)
+                            self._save_state(task_id, user_input, turn)
+
+                    # 检查动作窗口是否跨过边界：thinking 完成后再清空当前可见动作窗口
+                    crossed_action_window = (counter_before // self.action_window_steps) < (self.tool_call_counter // self.action_window_steps)
+                    if self.tool_call_counter > 0 and crossed_action_window:
+                        self.action_history = []
+                        self.llm_turn_counter = 0
+                
+                except Exception as e:
+                    return self._handle_execution_error(e)
+            timeout_result = {
+                "status": "error",
+                "output": f"执行超过最大轮次限制: {self.max_turns}",
+                "error_information": f"Max turns {self.max_turns} exceeded"
+            }
+            timeout_result = self._with_model_outputs(timeout_result)
+            self.hierarchy_manager.pop_agent(self.agent_id, str(timeout_result))
+            self.event_emitter.dispatch(AgentEndEvent(status='error', result=timeout_result))
+            self.event_emitter.dispatch(CliDisplayEvent(
+                message="\n⚠️ 达到最大轮次限制: {self.max_turns}"
+            ))
+            
+            return timeout_result
+        finally:
+            unregister_running_task(task_id)
+
+    def _load_state_from_storage(self, task_id: str) -> int:
+        """从存储加载状态, 返回起始轮次."""
+        loaded_data = self.conversation_storage.load_actions(task_id, self.agent_id)
+        start_turn = 0
+        
+        if loaded_data:
+            self.action_history = loaded_data.get("action_history", [])
+            self.action_history_fact = loaded_data.get("action_history_fact", [])
+            self.pending_tools = loaded_data.get("pending_tools", [])
+            self.latest_thinking = loaded_data.get("latest_thinking", "")
+            self.first_thinking_done = loaded_data.get("first_thinking_done", False)
+            self.tool_call_counter = loaded_data.get("tool_call_counter", 0)
+            self.llm_turn_counter = loaded_data.get("llm_turn_counter", 0)
+            start_turn = loaded_data.get("current_turn", 0) + 1
+            
+            self.event_emitter.dispatch(HistoryLoadEvent(
+                start_turn=start_turn,
+                action_history_len=len(self.action_history),
+                action_history_fact_len=len(self.action_history_fact),
+                pending_tool_count=len(self.pending_tools)
+            ))
+            
+            # 检查是否已经完成（有final_output）
+            for action in self.action_history_fact:
+                if action.get("tool_name") == "final_output":
+                    final_result = action.get("result", {})
+                    self.event_emitter.dispatch(CliDisplayEvent(
+                        message=f"\n✅ 任务已完成，直接返回之前的final_output结果\n   状态: {final_result.get('status')}", 
+                        style='success'
+                    ))
+                    return final_result
+            
+            # 恢复pending工具（如果有）
+            if self.pending_tools:
+                self._recover_pending_tools(task_id)
+
+        return start_turn
+
+    def _build_messages_from_action_history(self) -> List[Dict]:
+        """
+        从 action_history 动态重建 OpenAI 标准格式的 messages 数组
+        
+        支持三种 action 类型：
+        1. _historical_summary → user 消息（压缩后的历史摘要）
+        2. _no_tool_call → assistant 消息（纯文本）+ user 消息（提醒）
+        3. 普通 action → 按 _turn 分组为 assistant(tool_calls) + tool(results) + user(images)
+        
+        Returns:
+            OpenAI 格式的 messages 列表
+        """
+        # 初始 user 消息
+        messages = [{
+            "role": "user", 
+            "content": "请根据当前任务和上下文，执行下一步操作。请调用合适的工具来完成任务。不要重复已执行的动作！"
+        }]
+        
+        if not self.action_history:
+            return messages
+
+        use_kimi_history_tool_ids = self._should_normalize_kimi_history_tool_ids()
+        history_tool_call_index = 0
+
+        # 按 _turn 分组普通 action
+        turns = OrderedDict()
+        
+        for action in self.action_history:
+            tool_name = action.get("tool_name", "")
+            
+            # 特殊处理：历史摘要（压缩产物）
+            if tool_name == "_historical_summary":
+                messages.append({
+                    "role": "user",
+                    "content": f"[Previous actions summary]\n{action['result']['output']}"
+                })
+                continue
+            
+            # 特殊处理：LLM 未调用工具
+            if tool_name == "_no_tool_call":
+                assistant_content = action.get("assistant_content", "")
+                if assistant_content:
+                    messages.append({"role": "assistant", "content": assistant_content})
+                messages.append({
+                    "role": "user",
+                    "content": action["result"].get("output", "请调用工具")
+                })
+                continue
+            
+            # 普通 action - 按 _turn 分组
+            turn = action.get("_turn", 0)  # 向后兼容：旧记录默认 turn=0
+            
+            if turn not in turns:
+                turns[turn] = {
+                    "assistant_content": action.get("assistant_content", ""),
+                    "reasoning_content": action.get("reasoning_content", ""),
+                    "tool_calls": [],
+                    "tool_results": [],
+                    "images": []
+                }
+            
+            # 构建 tool_call 条目
+            tool_call_id = action.get("tool_call_id", f"call_{turn}_{len(turns[turn]['tool_calls'])}")
+            if use_kimi_history_tool_ids:
+                tool_call_id = self._format_kimi_history_tool_call_id(
+                    tool_name=action.get("tool_name", ""),
+                    sequence_index=history_tool_call_index,
+                )
+            history_tool_call_index += 1
+            turns[turn]["tool_calls"].append({
+                "id": tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": action["tool_name"],
+                    "arguments": json.dumps(action["arguments"], ensure_ascii=False)
+                }
+            })
+            
+            # 构建 tool result 消息
+            has_image = action.get("_has_image", False)
+            has_base64 = bool(action.get("_image_base64"))
+            
+            if has_image and has_base64:
+                # 有图片且有 base64 数据 → tool result 简短说明，图片在后续 user 消息中嵌入
+                result_content = "Image loaded successfully. See below."
+            else:
+                # 无图片 或 有图片标记但 base64 丢失（Ctrl+C 恢复场景）→ 正常 JSON 结果
+                # 排除 _image_base64 等内部字段
+                result_clean = {k: v for k, v in action.get("result", {}).items() 
+                               if not k.startswith("_")}
+                result_content = json.dumps(result_clean, ensure_ascii=False)
+            
+            turns[turn]["tool_results"].append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": result_content
+            })
+            
+            # 收集图片数据（方案二：后续 user 消息嵌入）
+            # 只有同时有 _has_image 标记和实际 base64 数据时才嵌入图片
+            if has_image and has_base64:
+                query = action.get("arguments", {}).get("query", "请分析这些图片")
+                img_data = action["_image_base64"]
+                # 兼容列表和单值
+                if isinstance(img_data, list):
+                    base64_list = img_data
+                else:
+                    base64_list = [img_data]
+                turns[turn]["images"].append({
+                    "base64_list": base64_list,
+                    "query": query
+                })
+        
+        # 从分组数据构建 messages
+        for turn_num in sorted(turns.keys()):
+            turn_data = turns[turn_num]
+            
+            # assistant 消息（包含 content、tool_calls、reasoning_content）
+            assistant_msg = {
+                "role": "assistant",
+                "content": turn_data["assistant_content"] or None,
+                "tool_calls": turn_data["tool_calls"]
+            }
+            # 如果有 reasoning_content，添加到 assistant 消息中
+            # LiteLLM 会将其传递给支持 thinking 的模型（如 Anthropic Claude）
+            if turn_data.get("reasoning_content"):
+                assistant_msg["reasoning_content"] = turn_data["reasoning_content"]
+            messages.append(assistant_msg)
+            
+            # tool result 消息（每个 tool_call 对应一个）
+            messages.extend(turn_data["tool_results"])
+            
+            # 图片消息（方案二：跟在 tool result 后面的 user 消息，多张图合并到一条消息）
+            for img_group in turn_data["images"]:
+                content_parts = []
+                for b64 in img_group["base64_list"]:
+                    image_url = b64 if b64.startswith("data:") else f"data:image/jpeg;base64,{b64}"
+                    content_parts.append({"type": "image_url", "image_url": {"url": image_url}})
+                content_parts.append({
+                    "type": "text",
+                    "text": f"上面是 image_read 获取的 {len(img_group['base64_list'])} 张图片。Agent 的问题是: {img_group['query']}"
+                })
+                messages.append({"role": "user", "content": content_parts})
+        
+        return messages
+
+    def _should_normalize_kimi_history_tool_ids(self) -> bool:
+        model_name = str(getattr(self, "execution_model", "") or "").strip().lower()
+        if not model_name:
+            return False
+        return "kimi-k2" in model_name or ("moonshot" in model_name and "kimi" in model_name)
+
+    @staticmethod
+    def _format_kimi_history_tool_call_id(tool_name: str, sequence_index: int) -> str:
+        safe_tool_name = str(tool_name or "").strip() or "tool"
+        return f"functions.{safe_tool_name}:{max(0, int(sequence_index))}"
+    def _execute_llm_call(self, system_prompt: str, messages: List[Dict] = None, task_id: Optional[str] = None):
+        """
+        执行LLM调用并分发事件
+        
+        Args:
+            system_prompt: 系统提示词（不含历史动作）
+            messages: OpenAI 标准格式的 messages 数组（包含历史动作）
+        """
+        if messages is None:
+            # 向后兼容：如果没有传 messages，使用简单的 user 消息
+            messages = [{"role": "user", "content": "请输出下一个动作"}]
+        
+        # 发送LLM调用开始事件
+        self.event_emitter.dispatch(LlmCallStartEvent(
+            model=self.execution_model, 
+            system_prompt=system_prompt
+        ))
+        
+        execution_tool_choice = self.llm_client.resolve_tool_choice(
+            category="execution",
+            model=self.execution_model,
+        )
+        max_tokens_override = self.agent_config.get("max_tokens")
+        # 调用LLM（重试机制已在 llm_client 内部实现）
+        llm_response = self.llm_client.chat(
+            history=messages,
+            model=self.execution_model,
+            system_prompt=system_prompt,
+            tool_list=self.available_tools,
+            tool_choice=execution_tool_choice,
+            max_tokens=max_tokens_override,
+            emit_tokens="token",  # 主 Agent 调用：流式发送 content token
+            debug_task_id=task_id,
+            debug_label="execution",
+            stream_callback=self._build_llm_stream_callback(
+                stream_group="llm",
+                agent_name=self.agent_name,
+                model=self.execution_model,
+            ) if self.stream_llm_tokens else None,
+        )
+
+        llm_record = {
+            "turn_index": self.llm_turn_counter,
+            "model": llm_response.model or self.execution_model,
+            "content": llm_response.output or "",
+            "reasoning_content": llm_response.reasoning_content or "",
+            "finish_reason": llm_response.finish_reason or "",
+            "tool_calls": [
+                {
+                    "id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                }
+                for tool_call in (llm_response.tool_calls or [])
+            ],
+            "status": llm_response.status,
+        }
+        self.execution_traces.append(llm_record)
+        
+        self.event_emitter.dispatch(LlmCallEndEvent(
+            llm_output=llm_response.output, 
+            tool_calls=llm_record["tool_calls"],
+            model=llm_record["model"],
+            reasoning_content=llm_record["reasoning_content"],
+            finish_reason=llm_record["finish_reason"],
+        ))
+        return llm_response
+
+    def _execute_tool_call(self, tool_call: Dict, task_id: str, user_input: str, turn: int,
+                          assistant_content: str = "", reasoning_content: str = "",
+                          llm_turn: int = 0) -> Dict:
+        """
+        执行单个工具调用并分发事件
+        
+        Args:
+            tool_call: 工具调用对象（包含 id, name, arguments）
+            task_id: 任务ID
+            user_input: 用户输入
+            turn: 当前执行轮次
+            assistant_content: 该轮 LLM 响应的文本内容（同轮所有 tool_call 共享）
+            reasoning_content: 该轮 LLM 响应的推理/思考内容（同轮所有 tool_call 共享）
+            llm_turn: LLM 调用轮次（用于消息分组）
+        """
+        # ✅ 在保存 pending 之前，为 level != 0 的工具添加 uuid
+        arguments_with_uuid = self._add_uuid_if_needed(tool_call.name, tool_call.arguments)
+        
+        # ✅ 先标记为pending（保存带 uuid 的参数）
+        # 发送工具调用开始事件
+        self.event_emitter.dispatch(ToolCallStartEvent(
+            tool_name=tool_call.name, 
+            arguments=arguments_with_uuid
+        ))
+
+        pending_tool = {
+            "id": tool_call.id,
+            "name": tool_call.name,
+            "arguments": arguments_with_uuid,
+            "status": "pending"
+        }
+        self.pending_tools.append(pending_tool)
+        self._save_state(task_id, user_input, turn)  # 保存pending状态
+
+        # 执行工具（使用带 uuid 的参数）
+        tool_result = self.tool_executor.execute(
+            tool_call.name,
+            arguments_with_uuid,
+            task_id
+        )
+
+        self._handle_special_tool_side_effects(
+            tool_name=tool_call.name,
+            tool_result=tool_result,
+            task_id=task_id,
+            user_input=user_input,
+            turn=turn
+        )
+
+        # ✅ 执行后从pending移除
+        self.pending_tools = [t for t in self.pending_tools if t["id"] != tool_call.id]
+        
+        # 发送工具结果事件
+        self.event_emitter.dispatch(ToolCallEndEvent(
+            tool_name=tool_call.name, 
+            status=tool_result.get('status', 'unknown'), 
+            result=tool_result
+        ))
+
+        # 记录动作到历史（增强格式：包含消息重建所需的字段）
+        action_record = {
+            "_turn": llm_turn,
+            "tool_call_id": tool_call.id,
+            "tool_name": tool_call.name,
+            "arguments": arguments_with_uuid,
+            "result": tool_result,
+            "assistant_content": assistant_content,
+            "reasoning_content": reasoning_content,  # 模型的推理/思考内容
+            "_has_image": False,
+            "_image_base64": None
+        }
+        
+        # 处理 image_read 工具返回（无论 multimodal 设置如何，都要清理 base64）
+        if tool_call.name == "image_read":
+            image_base64_list = None
+            
+            # 工具执行层会把工具返回值 json.dumps 到 output 字符串中
+            # 所以 _image_base64_list 可能嵌套在 output 字符串里，需要解析提取
+            output_str = tool_result.get("output", "")
+            if isinstance(output_str, str) and ("_image_base64_list" in output_str or "_image_base64" in output_str):
+                try:
+                    inner_result = json.loads(output_str)
+                    # 新格式：_image_base64_list（数组）
+                    image_base64_list = inner_result.get("_image_base64_list")
+                    # 兼容旧格式：_image_base64（单值）→ 转为列表
+                    if not image_base64_list:
+                        single = inner_result.get("_image_base64")
+                        if single:
+                            image_base64_list = [single]
+                    
+                    # 从 output 中移除所有 base64 数据
+                    inner_result.pop("_image_base64_list", None)
+                    inner_result.pop("_image_base64", None)
+                    inner_result.pop("_multimodal", None)
+                    tool_result["output"] = json.dumps(inner_result, indent=2, ensure_ascii=False)
+                    action_record["result"] = tool_result
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
+            # 也检查顶层（以防未双重包装）
+            if not image_base64_list:
+                top_list = tool_result.get("_image_base64_list")
+                top_single = tool_result.get("_image_base64")
+                if top_list:
+                    image_base64_list = top_list
+                elif top_single:
+                    image_base64_list = [top_single]
+                tool_result.pop("_image_base64_list", None)
+                tool_result.pop("_image_base64", None)
+                tool_result.pop("_multimodal", None)
+                action_record["result"] = tool_result
+            
+            # 只有当主模型支持多模态时，才将图片嵌入 messages
+            if image_base64_list and self.llm_client.multimodal:
+                action_record["_has_image"] = True
+                action_record["_image_base64"] = image_base64_list  # 现在是列表
+        
+        # 添加到完整轨迹（永不压缩，但不存储 base64 以节省空间）
+        fact_record = {k: v for k, v in action_record.items() if k != "_image_base64"}
+        fact_record["_image_base64"] = None  # fact 中不保留 base64，仅记录 _has_image 标志
+        self.action_history_fact.append(fact_record)
+
+        # 添加到渲染历史（会被压缩，保留 base64 用于 messages 重建）
+        self.action_history.append(action_record)
+
+        self.hierarchy_manager.add_action(self.agent_id, {
+            "tool_name": tool_call.name,
+            "arguments": arguments_with_uuid,
+            "result": {k: v for k, v in tool_result.items() if not k.startswith("_")}
+        })
+
+        # 工具执行后保存状态
+        self._save_state(task_id, user_input, turn)
+        
+        # 增加工具调用计数
+        self.tool_call_counter += 1
+        
+        # 如果是final_output，返回结果
+        if tool_call.name == "final_output":
+            return tool_result
+        return None
+
+    def _handle_special_tool_side_effects(self, tool_name: str, tool_result: Dict, task_id: str, user_input: str, turn: int):
+        """处理 load_skill / offload_skill / fresh 等特殊副作用。"""
+        if tool_name == "load_skill" and tool_result.get("status") == "success":
+            skill_name = tool_result.get("_skill_name")
+            if skill_name:
+                self.hierarchy_manager.add_loaded_skill(self.agent_id, {
+                    "name": skill_name,
+                    "abs_path": tool_result.get("_skill_abs_path", ""),
+                    "workspace_path": tool_result.get("_workspace_skill_path", ""),
+                    "md_text": tool_result.get("_skill_md_text", "")
+                })
+            for k in ["_skill_name", "_skill_abs_path", "_workspace_skill_path", "_skill_md_text"]:
+                tool_result.pop(k, None)
+
+        elif tool_name == "offload_skill" and tool_result.get("status") == "success":
+            skill_name = tool_result.get("_offload_skill_name")
+            if skill_name:
+                self.hierarchy_manager.remove_loaded_skill(self.agent_id, skill_name)
+            tool_result.pop("_offload_skill_name", None)
+
+        elif tool_name == "fresh" and tool_result.get("_fresh_requested"):
+            reason = tool_result.get("_fresh_reason") or "manual fresh requested"
+            target_task_id = str(tool_result.get("_fresh_task_id") or "").strip() or task_id
+            if target_task_id == task_id:
+                ok, msg = self._perform_fresh(task_id, user_input, turn, reason)
+            elif is_task_running(target_task_id):
+                request_fresh(reason=reason, task_id=target_task_id)
+                ok = True
+                msg = f"已向运行中的任务发送 fresh 请求: {target_task_id}"
+            else:
+                ok, msg = resume_task_with_fresh(
+                    task_id=target_task_id,
+                    reason=reason,
+                    fallback_agent_system=self.config_loader.agent_system_name,
+                    direct_tools=self.direct_tools,
+                )
+            if ok:
+                tool_result["output"] = f"{tool_result.get('output', '').strip()}\n\n{msg}".strip()
+            else:
+                tool_result["status"] = "error"
+                tool_result["error"] = msg
+                tool_result["output"] = ""
+            tool_result.pop("_fresh_requested", None)
+            tool_result.pop("_fresh_reason", None)
+            tool_result.pop("_fresh_task_id", None)
+
+    def _maybe_run_scheduled_fresh(self, task_id: str, user_input: str, turn: int):
+        external_reason = pop_fresh_request(task_id)
+        if external_reason:
+            self._perform_fresh(task_id, user_input, turn, external_reason)
+            return
+        if not self.fresh_enabled or self.fresh_interval_sec <= 0:
+            return
+        if time.time() - self.last_fresh_at < self.fresh_interval_sec:
+            return
+        self._perform_fresh(task_id, user_input, turn, "scheduled fresh")
+
+    def _perform_fresh(self, task_id: str, user_input: str, turn: int, reason: str):
+        """
+        在安全点刷新运行时配置/注册表/skill缓存，并继续当前任务。
+        """
+        if has_running_background_processes(task_id):
+            return False, "当前仍有后台工具在运行，暂不允许 fresh。请等待后台工具结束后再刷新。"
+
+        self.event_emitter.dispatch(CliDisplayEvent(
+            message=f"🔄 Fresh 开始: {reason}",
+            style='info'
+        ))
+
+        apply_runtime_env_defaults()
+        reset_skill_loader()
+        reload_runtime_registry()
+        reload_mcp_tools()
+
+        # 重新读取运行时参数
+        runtime = get_runtime_settings()
+        self.action_window_steps = int(self.agent_config.get("action_window_steps") or runtime.get("action_window_steps", 30))
+        self.thinking_interval = int(self.agent_config.get("thinking_interval") or runtime.get("thinking_interval", self.action_window_steps))
+        self.fresh_enabled = runtime.get("fresh_enabled", False)
+        self.fresh_interval_sec = runtime.get("fresh_interval_sec", 0)
+        self.last_fresh_at = time.time()
+
+        # 重新加载 config_loader / agent_config / llm_client / context_builder / tool_executor
+        loader_cls = self.config_loader.__class__
+        self.config_loader = loader_cls(self.config_loader.agent_system_name)
+        self.agent_config = self.config_loader.get_tool_config(self.agent_name)
+        self.available_tools = list(self.agent_config.get("available_tools", []))
+        self._inject_mcp_tools()
+
+        self.llm_client = SimpleLLMClient()
+        self.llm_client.set_tools_config(self.config_loader.all_tools)
+        requested_model = self._get_agent_model_preference("execution")
+        self.execution_model = self.llm_client.resolve_model("execution", requested_model)
+        self.model_type = self.execution_model
+
+        self.context_builder = ContextBuilder(
+            self.hierarchy_manager,
+            agent_config=self.agent_config,
+            config_loader=self.config_loader,
+            llm_client=self.llm_client,
+            max_context_window=self.llm_client.max_context_window
+        )
+        self.tool_executor = ToolExecutor(
+            self.config_loader,
+            self.hierarchy_manager,
+            direct_mode=self.direct_tools,
+            extra_event_handlers=self.extra_event_handlers,
+            exit_on_error=self.exit_on_error,
+            raise_on_error=self.raise_on_error,
+        )
+        self.tool_executor.set_agent_context(agent_id=self.agent_id, agent_name=self.agent_name)
+        if hasattr(self, "action_compressor"):
+            delattr(self, "action_compressor")
+
+        self._save_state(task_id, user_input, turn)
+        self.event_emitter.dispatch(CliDisplayEvent(
+            message=f"✅ Fresh 完成，已重载配置/工具注册/skills 缓存，并继续当前任务",
+            style='success'
+        ))
+        return True, "Fresh 完成，已重载配置/工具注册/skills 缓存，并继续当前任务。"
+
+    def _handle_execution_error(self, e: Exception) -> Dict:
+        """统一处理执行过程中的异常"""
+        # 获取详细错误信息
+        error_type = type(e).__name__
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+        
+        # 构建友好的错误提示消息
+        error_display = f"""
+❌ 执行过程中发生错误，任务已中断
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔴 错误类型: {error_type}
+📝 错误信息: {error_msg}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 详细堆栈:
+{error_traceback}
+"""
+        
+        # 添加当前进度信息
+        if self.latest_thinking:
+            error_display += f"\n💭 当前进度:\n{self.latest_thinking[:500]}\n"
+        
+        error_display += """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 任务已保存在当前状态，请:
+   1. 根据错误信息排查问题（修复网络、配置等）
+   2. 重新启动 CLI 并输入 /resume 命令恢复任务
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+        error_result = {
+            "status": "error",
+            "task_id": self.current_task_id,
+            "agent_name": self.agent_name,
+            "output": "",
+            "error_type": error_type,
+            "error_message": error_msg,
+            "error_information": error_display,
+            "latest_thinking": self.latest_thinking,
+        }
+        error_result = self._with_model_outputs(error_result)
+        # 通过事件发送错误
+        self.event_emitter.dispatch(ErrorEvent(error_display=error_display))
+        self.event_emitter.dispatch(AgentEndEvent(status='error', result=error_result))
+        if self.raise_on_error:
+            raise InfiAgentRunError.from_result(
+                error_result,
+                task_id=self.current_task_id or "",
+                agent_name=self.agent_name,
+                stage="run",
+            )
+        if self.exit_on_error:
+            sys.exit(1)
+        return error_result
+
+    def _add_uuid_if_needed(
+            self, 
+            tool_name: str, 
+            arguments: Dict
+        ) -> Dict:
+        """
+        为 level != 0 的工具添加 uuid 后缀到 task_input
+        
+        Args:
+            tool_name: 工具名称
+            arguments: 原始参数
+            
+        Returns:
+            处理后的参数（如果需要添加 uuid，返回新字典；否则返回原字典）
+        """
+        try:
+            # 获取工具配置
+            tool_config = self.config_loader.get_tool_config(tool_name)
+            tool_level = tool_config.get("level", 0)
+            tool_type = tool_config.get("type", "")
+            
+            # 只对 level != 0 的 llm_call_agent 添加 uuid
+            if tool_type == "llm_call_agent" and tool_level != 0 and "task_input" in arguments:
+                import uuid
+                # 创建新字典（避免修改原始参数）
+                new_arguments = arguments.copy()
+                original_input = arguments["task_input"]
+                random_suffix = f" [call-{uuid.uuid4().hex[:8]}]"
+                new_arguments["task_input"] = original_input + random_suffix
+                self.event_emitter.dispatch(CliDisplayEvent(
+                    message=f"   🔖 为 level {tool_level} 工具添加 uuid 后缀", 
+                    style='info'
+                ))
+                return new_arguments
+            
+            # 其他情况返回原参数
+            return arguments
+        
+        except Exception as e:
+            self.event_emitter.dispatch(CliDisplayEvent(
+                message=f"⚠️ 添加 uuid 时出错: {e}", 
+                style='warning'
+            ))
+            return arguments
+    
+    def _trigger_thinking(self, task_id: str, task_input: str, is_initial: bool = False, is_forced: bool = False) -> str:
+        """
+        触发Thinking Agent进行分析
+        
+        Args:
+            task_id: 任务ID
+            task_input: 任务输入
+            is_initial: 是否是首次thinking
+            is_forced: 是否因为多次未调用工具而被强制触发thinking
+            
+        Returns:
+            分析结果
+        """
+        # 发送Thinking开始事件
+        self.event_emitter.dispatch(ThinkingStartEvent(
+            agent_name=self.agent_name, 
+            is_initial=is_initial, 
+            is_forced=is_forced
+        ))
+        try:
+            from services.thinking_agent import ThinkingAgent
+
+            thinking_agent = ThinkingAgent(
+                preferred_model=self._get_agent_model_preference("thinking"),
+                max_tokens=self.agent_config.get("max_tokens"),
+            )
+
+            # 构建完整的系统提示词（包含历史动作XML，供 thinking agent 分析）
+            full_system_prompt = self.context_builder.build_context(
+                task_id,
+                self.agent_id,
+                self.agent_name,
+                task_input,
+                action_history=self.action_history,
+                include_action_history=True  # thinking agent 需要看到历史动作
+            )
+            thinking_payload = thinking_agent.analyze_first_thinking_detail(
+                task_description=task_input,
+                agent_system_prompt=full_system_prompt,
+                available_tools=self.available_tools,
+                tools_config=self.config_loader.all_tools,
+                action_history=self.action_history,  # 传递 action_history（含图片数据）
+                multimodal=self.llm_client.multimodal,  # 传递多模态标志
+                debug_task_id=task_id,
+                stream_callback=self._build_llm_stream_callback(
+                    stream_group="thinking",
+                    agent_name=self.agent_name,
+                    model=thinking_agent.llm_client.resolve_model("thinking", thinking_agent.preferred_model),
+                    is_initial=is_initial,
+                    is_forced=is_forced,
+                ) if self.stream_llm_tokens else None,
+            )
+            result = thinking_payload["formatted_result"]
+            thinking_record = {
+                "model": thinking_payload.get("model", ""),
+                "content": thinking_payload.get("raw_output", ""),
+                "reasoning_content": thinking_payload.get("raw_reasoning_content", ""),
+                "formatted_result": result,
+                "finish_reason": thinking_payload.get("finish_reason", ""),
+                "status": thinking_payload.get("status", "success"),
+                "is_initial": bool(is_initial),
+                "is_forced": bool(is_forced),
+            }
+            self.thinking_traces.append(thinking_record)
+            # 发送 thinking 事件（完整内容）
+            self.event_emitter.dispatch(ThinkingEndEvent(
+                agent_name=self.agent_name, 
+                result=result,
+                model=thinking_record["model"],
+                raw_output=thinking_record["content"],
+                raw_reasoning_content=thinking_record["reasoning_content"],
+                finish_reason=thinking_record["finish_reason"],
+                is_initial=is_initial,
+                is_forced=is_forced
+            ))
+            return result
+        except Exception as e:
+            error_msg = str(e)
+            # 发送Thinking失败事件
+            self.event_emitter.dispatch(ThinkingFailEvent(
+                agent_name=self.agent_name, 
+                error_message=error_msg
+            ))
+            raise Exception(str(e))
+
+    def _build_llm_stream_callback(
+        self,
+        *,
+        stream_group: str,
+        agent_name: str,
+        model: str,
+        is_initial: bool = False,
+        is_forced: bool = False,
+    ):
+        def _callback(chunk: Dict[str, Any]):
+            kind = str((chunk or {}).get("kind") or "content").strip().lower()
+            text = str((chunk or {}).get("text") or "")
+            if not text:
+                return
+            current_model = str((chunk or {}).get("model") or model or "")
+            if stream_group == "thinking":
+                event_type = "run.thinking.reasoning_token" if kind == "reasoning" else "run.thinking.token"
+                payload = {
+                    "agent_name": agent_name,
+                    "model": current_model,
+                    "text": text,
+                    "token_kind": kind,
+                    "is_initial": bool(is_initial),
+                    "is_forced": bool(is_forced),
+                }
+            else:
+                event_type = "run.llm.reasoning_token" if kind == "reasoning" else "run.llm.token"
+                payload = {
+                    "agent_name": agent_name,
+                    "model": current_model,
+                    "text": text,
+                    "token_kind": kind,
+                }
+            self._emit_sdk_stream_event(event_type, payload)
+
+        return _callback
+
+    def _build_model_outputs_payload(self) -> Dict[str, Any]:
+        execution_traces = list(getattr(self, "execution_traces", []) or [])
+        thinking_traces = list(getattr(self, "thinking_traces", []) or [])
+        last_execution = execution_traces[-1] if execution_traces else None
+        last_thinking = thinking_traces[-1] if thinking_traces else None
+        return {
+            "execution_turns": execution_traces,
+            "thinking_turns": thinking_traces,
+            "last_execution": last_execution,
+            "last_thinking": last_thinking,
+        }
+
+    def _with_model_outputs(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        payload = dict(result or {})
+        model_outputs = self._build_model_outputs_payload()
+        payload["model_outputs"] = model_outputs
+
+        last_execution = model_outputs.get("last_execution") or {}
+        last_thinking = model_outputs.get("last_thinking") or {}
+
+        payload["last_execution_output"] = str(last_execution.get("content") or "")
+        payload["last_execution_reasoning_content"] = str(last_execution.get("reasoning_content") or "")
+        payload["last_execution_model"] = str(last_execution.get("model") or "")
+        payload["last_thinking_output"] = str(last_thinking.get("content") or "")
+        payload["last_thinking_reasoning_content"] = str(last_thinking.get("reasoning_content") or "")
+        payload["last_thinking_model"] = str(last_thinking.get("model") or "")
+        return payload
+
+    def _compress_action_history_if_needed(self):
+        """检查并压缩历史动作（如果超过上下文窗口限制）"""
+        if not self.action_history:
+            return
+        
+        try:
+            from services.action_compressor import ActionCompressor
+
+            # 初始化压缩器（如果还没有）
+            if not hasattr(self, 'action_compressor'):
+                self.action_compressor = ActionCompressor(
+                    self.llm_client,
+                    preferred_model=self._get_agent_model_preference("compressor"),
+                    max_tokens=self.agent_config.get("max_tokens"),
+                    debug_task_id=self.current_task_id,
+                )
+            else:
+                self.action_compressor.debug_task_id = self.current_task_id
+            
+            # 使用新的压缩策略（传入 thinking 和 task_input）
+            original_len = len(self.action_history)
+            compressed = self.action_compressor.compress_if_needed(
+                self.action_history,
+                self.llm_client.max_context_window,
+                thinking=self.latest_thinking,
+                task_input=self.current_task_input
+            )
+
+            # 如果发生了压缩，替换
+            if len(compressed) < original_len:
+                self.event_emitter.dispatch(CliDisplayEvent(
+                    message=f"✅ 历史动作已压缩: {original_len}条 → {len(compressed)}条", 
+                    style='success'
+                ))
+                self.action_history = compressed
+        except Exception as e:
+            self.event_emitter.dispatch(CliDisplayEvent(
+                message=f"⚠️ 压缩失败: {e}", 
+                style='warning'
+            ))
+            traceback.print_exc()
+    
+    def _recover_pending_tools(self, task_id: str):
+        """恢复pending状态的工具调用"""
+        for pending_tool in self.pending_tools:
+            tool_name, tool_args = pending_tool['name'], pending_tool['arguments']
+            try:
+                self.event_emitter.dispatch(CliDisplayEvent(
+                    message=f"   🔄 恢复执行: {tool_name}\n   📋 参数: {tool_args}", 
+                    style='info'
+                ))
+                
+                # 重新执行工具
+                tool_result = self.tool_executor.execute(
+                    tool_name,
+                    tool_args,
+                    task_id
+                )
+                
+                # 记录结果
+                action_record = {
+                    "tool_name": tool_name,
+                    "arguments": tool_args,
+                    "result": tool_result
+                }
+                
+                self.action_history_fact.append(action_record)
+                self.action_history.append(action_record)
+                
+                # 从pending移除
+                self.pending_tools.remove(pending_tool)
+                
+                self.event_emitter.dispatch(CliDisplayEvent(
+                    message=f"   ✅ 恢复完成: {tool_name}", 
+                    style='success'
+                ))
+                
+                # 如果是final_output，直接返回
+                if tool_name == "final_output":
+                    return tool_result
+            except Exception as e:
+                self.event_emitter.dispatch(CliDisplayEvent(
+                    message=f"   ❌ 恢复失败: {tool_name} - {e}", 
+                    style='error'
+                ))
+        # 清空pending列表
+        self.pending_tools = []
+    
+    def _save_state(self, task_id: str, user_input: str, current_turn: int):
+        """
+        保存当前状态
+        
+        Args:
+            task_id: 任务ID
+            user_input: 用户输入
+            current_turn: 当前轮次
+        """
+        # 构建完整的系统提示词（包含历史动作XML，用于调试/参考）
+        full_system_prompt = self.context_builder.build_context(
+            task_id,
+            self.agent_id,
+            self.agent_name,
+            user_input,
+            action_history=self.action_history,
+            include_action_history=True  # 保存时包含完整上下文
+        )
+
+        # 保存状态
+        self.conversation_storage.save_actions(
+            task_id=task_id,
+            agent_id=self.agent_id,
+            agent_name=self.agent_name,
+            task_input=user_input,
+            action_history=self.action_history,  # 渲染用（会压缩，含 base64）
+            action_history_fact=self.action_history_fact,  # 完整轨迹（不含 base64）
+            pending_tools=self.pending_tools,
+            current_turn=current_turn,
+            latest_thinking=self.latest_thinking,
+            first_thinking_done=self.first_thinking_done,
+            tool_call_counter=self.tool_call_counter,
+            llm_turn_counter=self.llm_turn_counter,
+            system_prompt=full_system_prompt
+        )
+
+
+if __name__ == "__main__":
+    from utils.config_loader import ConfigLoader
+    from core.hierarchy_manager import get_hierarchy_manager
+    
+    # 测试
+    config_loader = ConfigLoader("infiHelper")
+    hierarchy_manager = get_hierarchy_manager("test_task")
+
+    hierarchy_manager.start_new_instruction("测试任务")
+
+    # 获取writing_agent配置
+    agent_config = config_loader.get_tool_config("alpha_agent")
+
+    safe_print(f"✅ Agent配置: {agent_config.get('name')}")
+    safe_print(f"   Tools: {len(agent_config.get('available_tools', []))}")
