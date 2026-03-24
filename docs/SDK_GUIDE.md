@@ -623,6 +623,7 @@ print(result)
 - `include_trace=True` 时，返回值里会附带当前 task 的 `trace`
 - `raise_on_error=True` 时，`status="error"` 不再只靠返回值判断，而会抛出 `InfiAgentRunError`
 - `stream_llm_tokens=True` 时，`on_event` / `collect_events` 会额外收到 execution / thinking 的 token 级事件；默认关闭
+- `stream_llm_tokens` 只控制 SDK 是否把 token 级事件向外透出；LLM 请求层自己的 `timeout` / `stream_timeout` / `first_chunk_timeout` 仍然由 `llm_config.yaml` 控制
 
 也可以实时消费事件：
 
@@ -658,8 +659,16 @@ except InfiAgentRunError as exc:
 
 - `run.thinking.token`
 - `run.thinking.reasoning_token`
+- `run.thinking.reset`
 - `run.llm.token`
 - `run.llm.reasoning_token`
+- `run.llm.reset`
+
+说明：
+
+- `*.token` / `*.reasoning_token` 事件的 `payload` 里会带 `attempt`
+- 如果某一轮流式输出中途失败并触发重试，SDK 会先发 `run.llm.reset` 或 `run.thinking.reset`
+- 你的消费端应在收到 `reset` 后清空当前正在拼接的那一段流式文本，再继续接收下一次尝试的 token
 
 当前 `run()` 返回值的主要内容块通常包括：
 
@@ -894,6 +903,11 @@ result = await agent.run_async(
     raise_on_error=True,
 )
 ```
+
+这里的 `stream_llm_tokens=True` 语义和同步版完全一致：
+
+- 它控制 SDK 事件里是否透出 token
+- 不负责覆盖 `llm_config.yaml` 中的超时参数
 
 ### 13.2 async 版本的真实定位
 
