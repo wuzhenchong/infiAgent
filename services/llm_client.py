@@ -10,8 +10,9 @@ import yaml
 import time
 import json
 import copy
-import concurrent.futures
 import re
+import threading
+from queue import Empty, Queue
 from typing import Callable, List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -250,6 +251,65 @@ class SimpleLLMClient:
         safe_print(f"   默认Max Tokens: {self.max_tokens}")
         safe_print(f"   超时配置: timeout={self.timeout}s, stream_timeout={self.stream_timeout}s, first_chunk_timeout={self.first_chunk_timeout}s")
         safe_print(f"   多模态: multimodal={self.multimodal}, compressor_multimodal={self.compressor_multimodal}")
+
+    def _emit_stream_reset(
+        self,
+        stream_callback: Optional[Callable[[Dict[str, Any]], None]],
+        *,
+        model: str,
+        debug_label: str,
+        attempt: int,
+        reason: str,
+    ) -> None:
+        if not stream_callback:
+            return
+        try:
+            stream_callback({
+                "kind": "reset",
+                "text": "",
+                "model": model,
+                "debug_label": debug_label,
+                "attempt": int(attempt or 1),
+                "reason": str(reason or "retry"),
+            })
+        except Exception:
+            pass
+
+    def _fetch_response_and_first_chunk_with_timeout(
+        self,
+        *,
+        kwargs: Dict[str, Any],
+        timeout_sec: int,
+    ):
+        """在 daemon 线程里获取 response iterator 和首包，避免超时后主线程被 executor join 卡住。"""
+        result_queue: Queue = Queue(maxsize=1)
+
+        def _worker():
+            try:
+                iterator = completion(**kwargs)
+                first = next(iterator)
+                result_queue.put(("ok", (iterator, first)))
+            except Exception as exc:
+                result_queue.put(("error", exc))
+
+        worker = threading.Thread(
+            target=_worker,
+            name="llm-first-chunk",
+            daemon=True,
+        )
+        worker.start()
+
+        try:
+            status, payload = result_queue.get(timeout=timeout_sec)
+        except Empty:
+            raise TimeoutError(
+                f"连接建立或首包接收超时（超过 {timeout_sec}s）- 可能原因：httpx连接池死锁、网络断开、服务器无响应"
+            )
+
+        if status == "error":
+            raise payload
+
+        return payload
     
     def _parse_models_config(self, models_config: List, target_list: List, category: str):
         """
@@ -685,6 +745,13 @@ class SimpleLLMClient:
             if retry_count > 0:
                 safe_print(f"   🔄 LLM重试 {retry_count}/{max_retries}...")
                 time.sleep(2 * retry_count)  # 指数退避：2秒, 4秒, 6秒
+                self._emit_stream_reset(
+                    stream_callback,
+                    model=model,
+                    debug_label=debug_label,
+                    attempt=retry_count + 1,
+                    reason="retry",
+                )
                 
                 # 根据上次错误生成提示（帮助 LLM 避免重复错误）
                 if last_error:
@@ -696,7 +763,8 @@ class SimpleLLMClient:
             # 调用内部实现
             response = self._chat_internal(
                 history, model, fixed_system_prompt, tool_list, 
-                tool_choice, temperature, max_tokens, emit_tokens, debug_task_id, debug_label, stream_callback
+                tool_choice, temperature, max_tokens, emit_tokens, debug_task_id, debug_label, stream_callback,
+                retry_count + 1,
             )
             
             # 如果成功，直接返回
@@ -716,11 +784,19 @@ class SimpleLLMClient:
                     safe_print(f"   📝 已添加参数类型提示，立即重试...")
                     type_fix_attempted = True
                     last_error = response
+                    self._emit_stream_reset(
+                        stream_callback,
+                        model=model,
+                        debug_label=debug_label,
+                        attempt=retry_count + 1,
+                        reason="type_fix_retry",
+                    )
                     
                     # 立即重试，不计入retry_count
                     response = self._chat_internal(
                         history, model, fixed_system_prompt, tool_list, 
-                        tool_choice, temperature, max_tokens, emit_tokens, debug_task_id, debug_label, stream_callback
+                        tool_choice, temperature, max_tokens, emit_tokens, debug_task_id, debug_label, stream_callback,
+                        retry_count + 1,
                     )
                     
                     if response.status == "success":
@@ -735,6 +811,10 @@ class SimpleLLMClient:
             error_type = self._get_error_type(response.error_information)
             safe_print(f"   ⚠️ {error_type} (第{retry_count + 1}次)")
             last_error = response
+
+            if not self._is_retriable_error(response.error_information):
+                safe_print(f"   ⛔ 非可恢复错误，停止重试")
+                raise Exception(f"LLM 调用失败（不可重试）: {response.error_information}")
             
             if retry_count < max_retries:
                 continue  # 继续重试
@@ -762,6 +842,7 @@ class SimpleLLMClient:
         debug_task_id: Optional[str] = None,
         debug_label: str = "execution",
         stream_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        attempt_index: int = 1,
     ) -> LLMResponse:
         """
         LLM调用的内部实现（使用 LiteLLM 原生超时机制）
@@ -776,7 +857,7 @@ class SimpleLLMClient:
         """
         try:
             def _emit_stream_chunk(kind: str, text: str, current_model: str):
-                if not stream_callback or not text:
+                if not stream_callback or (kind != "reset" and not text):
                     return
                 try:
                     stream_callback({
@@ -784,6 +865,7 @@ class SimpleLLMClient:
                         "text": text,
                         "model": current_model,
                         "debug_label": debug_label,
+                        "attempt": int(attempt_index or 1),
                     })
                 except Exception:
                     pass
@@ -953,62 +1035,51 @@ class SimpleLLMClient:
                 try:
                     # --- 强制首包超时检测（包含 completion 调用以防止连接池死锁）---
                     try:
-                        # 定义完整的初始化和首包获取函数（防止 httpx 连接池锁死锁）
-                        def get_response_and_first_chunk():
-                            iterator = completion(**kwargs)
-                            first = next(iterator)
-                            return iterator, first
-
                         # 强制首包超时时间（秒），包含连接建立+首包接收，防止 httpx 连接池死锁
                         first_chunk_timeout = self.first_chunk_timeout  # 从配置文件读取
+                        response_iterator, first_chunk = self._fetch_response_and_first_chunk_with_timeout(
+                            kwargs=kwargs,
+                            timeout_sec=first_chunk_timeout,
+                        )
 
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                            future = executor.submit(get_response_and_first_chunk)
-                            try:
-                                # 强制等待整个初始化过程（包括 completion 调用）
-                                response_iterator, first_chunk = future.result(timeout=first_chunk_timeout)
+                        # 处理首包
+                        chunk_count += 1
+                        latency = time.time() - request_start_time
+                        safe_print(f"   ⚡️ 首包延迟: {latency:.2f}s")
 
-                                # 处理首包
-                                chunk_count += 1
-                                latency = time.time() - request_start_time
-                                safe_print(f"   ⚡️ 首包延迟: {latency:.2f}s")
+                        # 处理首包逻辑
+                        if hasattr(first_chunk, 'model'):
+                            response_model = first_chunk.model
 
-                                # 处理首包逻辑
-                                if hasattr(first_chunk, 'model'):
-                                    response_model = first_chunk.model
+                        if first_chunk.choices:
+                            delta = first_chunk.choices[0].delta
+                            if hasattr(delta, 'content') and delta.content:
+                                accumulated_content += delta.content
+                                visible_piece = content_stream_state.feed(delta.content)
+                                visible_content += visible_piece
+                                _emit_visible_text("content", visible_piece)
 
-                                if first_chunk.choices:
-                                    delta = first_chunk.choices[0].delta
-                                    if hasattr(delta, 'content') and delta.content:
-                                        accumulated_content += delta.content
-                                        visible_piece = content_stream_state.feed(delta.content)
-                                        visible_content += visible_piece
-                                        _emit_visible_text("content", visible_piece)
+                            # 累积 reasoning_content（thinking/reasoning 模型）
+                            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                                accumulated_reasoning_content += delta.reasoning_content
+                                visible_reasoning_piece = reasoning_stream_state.feed(delta.reasoning_content)
+                                visible_reasoning_content += visible_reasoning_piece
+                                _emit_visible_text("reasoning", visible_reasoning_piece)
 
-                                    # 累积 reasoning_content（thinking/reasoning 模型）
-                                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                                        accumulated_reasoning_content += delta.reasoning_content
-                                        visible_reasoning_piece = reasoning_stream_state.feed(delta.reasoning_content)
-                                        visible_reasoning_content += visible_reasoning_piece
-                                        _emit_visible_text("reasoning", visible_reasoning_piece)
+                            if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                                for tc in delta.tool_calls:
+                                    idx = tc.index
+                                    if idx not in accumulated_tool_calls:
+                                        accumulated_tool_calls[idx] = {"id": "", "name": "", "arguments": ""}
+                                    if tc.id:
+                                        accumulated_tool_calls[idx]["id"] = tc.id
+                                    if tc.function and tc.function.name:
+                                        accumulated_tool_calls[idx]["name"] += tc.function.name
+                                    if tc.function and tc.function.arguments:
+                                        accumulated_tool_calls[idx]["arguments"] += tc.function.arguments
 
-                                    if hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                        for tc in delta.tool_calls:
-                                            idx = tc.index
-                                            if idx not in accumulated_tool_calls:
-                                                accumulated_tool_calls[idx] = {"id": "", "name": "", "arguments": ""}
-                                            if tc.id:
-                                                accumulated_tool_calls[idx]["id"] = tc.id
-                                            if tc.function and tc.function.name:
-                                                accumulated_tool_calls[idx]["name"] += tc.function.name
-                                            if tc.function and tc.function.arguments:
-                                                accumulated_tool_calls[idx]["arguments"] += tc.function.arguments
-
-                                    if first_chunk.choices[0].finish_reason:
-                                        finish_reason = first_chunk.choices[0].finish_reason
-
-                            except concurrent.futures.TimeoutError:
-                                raise TimeoutError(f"连接建立或首包接收超时（超过 {first_chunk_timeout}s）- 可能原因：httpx连接池死锁、网络断开、服务器无响应")
+                            if first_chunk.choices[0].finish_reason:
+                                finish_reason = first_chunk.choices[0].finish_reason
 
                     except StopIteration:
                         safe_print("   ⚠️ 响应为空（无数据块）")
@@ -1121,6 +1192,13 @@ class SimpleLLMClient:
                         and not tried_kimi_non_stream_fallback
                     ):
                         safe_print("⚠️ Kimi raw tool-call markup detected without parsed tool_calls; retrying once with non-stream mode...")
+                        self._emit_stream_reset(
+                            stream_callback,
+                            model=response_model,
+                            debug_label=debug_label,
+                            attempt=attempt_index,
+                            reason="kimi_non_stream_fallback",
+                        )
                         kwargs["stream"] = False
                         tried_kimi_non_stream_fallback = True
                         continue
@@ -1150,7 +1228,8 @@ class SimpleLLMClient:
         except Exception as e:
             # 捕获所有异常，包括 LiteLLM 抛出的超时异常
             error_msg = str(e)
-            is_timeout = any(keyword in error_msg.lower() for keyword in ["timeout", "timed out", "time out"])
+            lowered_error_msg = error_msg.lower()
+            is_timeout = any(keyword in lowered_error_msg for keyword in ["timeout", "timed out", "time out"]) or "超时" in error_msg
             
             if is_timeout:
                 safe_print(f"⏱️  LLM调用超时 (原生超时机制)")
@@ -1314,7 +1393,8 @@ class SimpleLLMClient:
         Returns:
             友好的错误类型描述
         """
-        if "timeout" in error_info.lower() or "timed out" in error_info.lower():
+        lowered = error_info.lower()
+        if "timeout" in lowered or "timed out" in lowered or "time out" in lowered or "超时" in error_info:
             return "连接超时"
         elif "Internal Server Error" in error_info:
             return "服务器内部错误"
@@ -1338,6 +1418,67 @@ class SimpleLLMClient:
             return "余额不足"
         else:
             return "未知错误"
+
+    def _is_retriable_error(self, error_info: str) -> bool:
+        """
+        仅对更可能因网络/服务端抖动恢复的错误继续重试。
+        """
+        error_text = str(error_info or "")
+        lowered = error_text.lower()
+
+        non_retriable_markers = [
+            "invalid api key",
+            "incorrect api key",
+            "authentication",
+            "unauthorized",
+            "permission denied",
+            "forbidden",
+            "insufficient",
+            "quota",
+            "credit balance",
+            "payment required",
+            "model not found",
+            "no such model",
+            "unknown model",
+            "context length",
+            "maximum context length",
+            "prompt is too long",
+            "content policy",
+            "safety system",
+            "did not match schema",
+            "expected array, but got string",
+            "expected string, but got array",
+            "expected integer, but got null",
+            "not in request.tools",
+        ]
+        if any(marker in lowered for marker in non_retriable_markers):
+            return False
+
+        retriable_markers = [
+            "timeout",
+            "timed out",
+            "time out",
+            "internal server error",
+            "server error",
+            "service unavailable",
+            "bad gateway",
+            "gateway timeout",
+            "connection reset",
+            "connection aborted",
+            "connection refused",
+            "connection error",
+            "temporarily unavailable",
+            "temporarily overloaded",
+            "overloaded",
+            "rate limit",
+            "too many requests",
+            "httpx",
+        ]
+        if any(marker in lowered for marker in retriable_markers):
+            return True
+
+        # 对未知错误保守重试一次的价值通常高于直接放弃。
+        return True
     
     def _generate_retry_hint(self, error_info: str, retry_count: int) -> str:
         """

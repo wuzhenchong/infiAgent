@@ -6,7 +6,7 @@
   <h1>MLA V3 - 打造专属领域的 SOTA 级智能体</h1>
 
   <p>
-    <img src="https://img.shields.io/badge/version-3.0.10-blue.svg" alt="Version">
+    <img src="https://img.shields.io/badge/version-3.1.1-blue.svg" alt="Version">
     <img src="https://img.shields.io/badge/python-3.9+-green.svg" alt="Python">
     <img src="https://img.shields.io/badge/license-GPL-blue.svg" alt="License: GPL">
   </p>
@@ -100,7 +100,7 @@ MLA完成的完整论文
 **Demo 1:**
 
 <p align="center">
-  <img src="assets/paper_generation_demo_1.gif" alt="Paper Generation Demo 1" width="800">
+  为了控制仓库体积，演示动图已不再放入 git 历史。
 </p>
 
 **Demo 2:**
@@ -116,6 +116,7 @@ MLA完成的完整论文
 </p>
 
 MLA 处理整个研究工作流程——从文献搜索和实验设计到代码执行、图表生成和 LaTeX 论文撰写。全部通过多层级智能体自动编排完成。
+演示视频和大体积 GIF 现已移出 git 历史，以便更轻量地克隆仓库。
 
 ---
 
