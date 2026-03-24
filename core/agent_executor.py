@@ -1125,6 +1125,17 @@ class AgentExecutor:
         def _callback(chunk: Dict[str, Any]):
             kind = str((chunk or {}).get("kind") or "content").strip().lower()
             text = str((chunk or {}).get("text") or "")
+            attempt = int((chunk or {}).get("attempt") or 1)
+            if kind == "reset":
+                event_type = "run.thinking.reset" if stream_group == "thinking" else "run.llm.reset"
+                payload = {
+                    "agent_name": agent_name,
+                    "model": str((chunk or {}).get("model") or model or ""),
+                    "attempt": attempt,
+                    "reason": str((chunk or {}).get("reason") or "retry"),
+                }
+                self._emit_sdk_stream_event(event_type, payload)
+                return
             if not text:
                 return
             current_model = str((chunk or {}).get("model") or model or "")
@@ -1135,6 +1146,7 @@ class AgentExecutor:
                     "model": current_model,
                     "text": text,
                     "token_kind": kind,
+                    "attempt": attempt,
                     "is_initial": bool(is_initial),
                     "is_forced": bool(is_forced),
                 }
@@ -1145,6 +1157,7 @@ class AgentExecutor:
                     "model": current_model,
                     "text": text,
                     "token_kind": kind,
+                    "attempt": attempt,
                 }
             self._emit_sdk_stream_event(event_type, payload)
 

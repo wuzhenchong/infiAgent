@@ -62,6 +62,14 @@ backend_build/__pycache__/
 model_tool_calling_test_results.json
 tests/debug_messages.json
 tests/*.png
+Test/
+tmp/
+web_ui/server/user_data/
+
+# Large demo media are kept outside git to avoid bloating repository history
+assets/*.mp4
+assets/paper_generation_demo_*.gif
+web_ui/*.mp4
 
 # Docker related (not needed in repo - use remote image)
 Dockerfile

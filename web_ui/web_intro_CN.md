@@ -66,10 +66,7 @@ MLA-V3 Web UI 提供了一个直观的图形界面，让您能够轻松地与 Ag
 
 ## 视频演示
 
-<video width="100%" controls>
-  <source src="web_intro.mp4" type="video/mp4">
-  您的浏览器不支持视频播放。
-</video>
+为了减少仓库体积，演示视频已不再直接存放在 git 中。
 
 ## 注意事项
 
@@ -77,4 +74,3 @@ MLA-V3 Web UI 提供了一个直观的图形界面，让您能够轻松地与 Ag
 - 对话历史会自动保存，刷新页面后可恢复
 - 文件浏览器实时同步 workspace 中的文件变化
 - 支持多任务切换，只需更改 Task ID 并点击 Confirm
-
