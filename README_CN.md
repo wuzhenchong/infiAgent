@@ -42,7 +42,7 @@
 
  [点击此处跳转下载页面](https://github.com/polyuiislab/infiAgent/releases/tag/v1.4.1).
 
-- [2026/02/09] **mac系统桌面端发布！**  [点击此处跳转下载页面](https://github.com/polyuiislab/infiAgent/releases/tag/MAC_OS_V1.1.0)。支持 skills的外部库导入，支持不同智能体共享记忆接力工作，支持本地模型完全本地化运行。
+- [2026/02/09] **mac系统桌面端发布！**  [点击此处跳转下载页面](https://github.com/polyuiislab/infiAgent/releases/tag/v1.4.1)。支持 skills的外部库导入，支持不同智能体共享记忆接力工作，支持本地模型完全本地化运行。
 
 <img width="1198" height="798" alt="image" src="https://github.com/user-attachments/assets/bae36a54-7c70-4ba5-a2cf-3d53856ca461" />
 
