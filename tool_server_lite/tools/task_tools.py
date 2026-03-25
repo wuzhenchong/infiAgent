@@ -69,6 +69,7 @@ class AddMessageTool(BaseTool):
             "stack_path": payload.get("stack_path", ""),
             "running": payload.get("running", False),
             "resumed": payload.get("resumed", False),
+            "launched": payload.get("launched", False),
         }
 
 

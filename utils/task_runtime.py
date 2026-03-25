@@ -77,6 +77,115 @@ def load_task_resume_meta(task_id: str, fallback_agent_system: Optional[str] = N
     }, ""
 
 
+def load_task_launch_meta(
+    task_id: str,
+    fallback_agent_system: Optional[str] = None,
+    fallback_agent_name: Optional[str] = None,
+) -> Tuple[Optional[Dict], str]:
+    """
+    读取“可新启动”所需的最小 task 元信息。
+
+    与 resume 不同，这里不要求 stack 非空。
+    """
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return None, "缺少 task_id"
+
+    manager = get_hierarchy_manager(task_id)
+    runtime_meta = manager.get_runtime_metadata()
+    if not isinstance(runtime_meta, dict):
+        runtime_meta = {}
+
+    agent_name = str(runtime_meta.get("agent_name") or fallback_agent_name or "alpha_agent").strip()
+    agent_system = str(runtime_meta.get("agent_system") or fallback_agent_system or "OpenCowork").strip()
+
+    if not agent_name:
+        return None, f"任务 {task_id} 的启动信息缺少 agent_name。"
+    if not agent_system:
+        return None, f"任务 {task_id} 的启动信息缺少 agent_system。"
+
+    return {
+        "task_id": task_id,
+        "agent_name": agent_name,
+        "agent_system": agent_system,
+    }, ""
+
+
+def _parse_env_flag(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _build_launch_config_from_env_overrides(env_overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    overrides = dict(env_overrides or {})
+    config: Dict[str, Any] = {}
+
+    mapping = {
+        "MLA_USER_DATA_ROOT": "user_data_root",
+        "MLA_LLM_CONFIG_PATH": "llm_config_path",
+        "MLA_AGENT_LIBRARY_DIR": "agent_library_dir",
+        "MLA_SKILLS_LIBRARY_DIR": "skills_dir",
+        "MLA_TOOLS_LIBRARY_DIR": "tools_dir",
+    }
+    for env_key, config_key in mapping.items():
+        value = overrides.get(env_key)
+        if value:
+            config[config_key] = value
+
+    int_mapping = {
+        "MLA_ACTION_WINDOW_STEPS": "action_window_steps",
+        "MLA_THINKING_INTERVAL": "thinking_interval",
+        "MLA_MAX_TURNS": "max_turns",
+        "MLA_FRESH_INTERVAL_SEC": "fresh_interval_sec",
+    }
+    for env_key, config_key in int_mapping.items():
+        value = overrides.get(env_key)
+        if value is None or value == "":
+            continue
+        try:
+            config[config_key] = int(value)
+        except Exception:
+            pass
+
+    fresh_enabled = _parse_env_flag(overrides.get("MLA_FRESH_ENABLED"))
+    if fresh_enabled is not None:
+        config["fresh_enabled"] = fresh_enabled
+
+    seed_builtin = _parse_env_flag(overrides.get("MLA_SEED_BUILTIN_RESOURCES"))
+    if seed_builtin is not None:
+        config["seed_builtin_resources"] = seed_builtin
+
+    json_mapping = {
+        "MLA_TOOL_HOOKS_JSON": "tool_hooks",
+        "MLA_CONTEXT_HOOKS_JSON": "context_hooks",
+    }
+    for env_key, config_key in json_mapping.items():
+        value = overrides.get(env_key)
+        if not value:
+            continue
+        try:
+            config[config_key] = json.loads(value)
+        except Exception:
+            pass
+
+    mcp_config = overrides.get("MLA_MCP_CONFIG_JSON")
+    if mcp_config:
+        try:
+            parsed = json.loads(mcp_config)
+            if isinstance(parsed, dict) and isinstance(parsed.get("servers"), list):
+                config["mcp_servers"] = parsed["servers"]
+        except Exception:
+            pass
+
+    return config
+
+
 def resume_task_with_fresh(
     task_id: str,
     reason: str = "",
@@ -163,12 +272,15 @@ def append_task_message(
 
     manager = get_hierarchy_manager(task_id)
     instruction_id = manager.append_instruction(message, dedupe=False, source=source)
+    stack = manager._load_stack()
     payload = {
         "task_id": task_id,
         "instruction_id": instruction_id,
         "share_context_path": str(manager.context_file),
         "stack_path": str(manager.stack_file),
         "running": is_task_running(task_id),
+        "resumed": False,
+        "launched": False,
     }
 
     if payload["running"]:
@@ -176,17 +288,50 @@ def append_task_message(
         return True, payload
 
     if resume_if_needed:
-        ok, resume_msg = resume_task_with_fresh(
-            task_id=task_id,
-            reason=f"resume after add_message: {message[:80]}",
+        if stack:
+            ok, resume_msg = resume_task_with_fresh(
+                task_id=task_id,
+                reason=f"resume after add_message: {message[:80]}",
+                fallback_agent_system=fallback_agent_system,
+                direct_tools=direct_tools,
+                env_overrides=env_overrides,
+            )
+            payload["resumed"] = ok
+            payload["message"] = resume_msg
+            if not ok:
+                payload["error"] = resume_msg
+                return False, payload
+            return True, payload
+
+        launch_meta, launch_error = load_task_launch_meta(
+            task_id,
             fallback_agent_system=fallback_agent_system,
-            direct_tools=direct_tools,
-            env_overrides=env_overrides,
         )
-        payload["resumed"] = ok
-        payload["message"] = resume_msg
+        if not launch_meta:
+            payload["message"] = launch_error
+            payload["error"] = launch_error
+            return False, payload
+
+        ok, launch_payload = launch_task_process(
+            task_id=task_id,
+            user_input=message,
+            agent_system=launch_meta["agent_system"],
+            agent_name=launch_meta["agent_name"],
+            config=_build_launch_config_from_env_overrides(env_overrides),
+            force_new=False,
+            direct_tools=direct_tools,
+        )
+        payload["launched"] = ok
+        payload["message"] = launch_payload.get("message") if isinstance(launch_payload, dict) else ""
+        if isinstance(launch_payload, dict):
+            payload.update({
+                "pid": launch_payload.get("pid"),
+                "log_path": launch_payload.get("log_path", ""),
+                "agent_system": launch_payload.get("agent_system", launch_meta["agent_system"]),
+                "agent_name": launch_payload.get("agent_name", launch_meta["agent_name"]),
+            })
         if not ok:
-            payload["error"] = resume_msg
+            payload["error"] = (launch_payload or {}).get("error") if isinstance(launch_payload, dict) else "后台启动失败"
             return False, payload
         return True, payload
 

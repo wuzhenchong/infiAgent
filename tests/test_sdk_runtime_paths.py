@@ -9,6 +9,7 @@ import time
 import unittest
 import warnings
 from pathlib import Path
+from unittest.mock import patch
 
 from infiagent import infiagent
 from core.hierarchy_manager import get_hierarchy_manager
@@ -16,6 +17,7 @@ from tool_server_lite.tools.skill_tools import FreshTool
 from tool_server_lite.tools.task_tools import AddMessageTool, ListTaskIdsTool, TaskShareContextPathTool
 from utils.config_loader import ConfigLoader
 from utils.runtime_control import pop_fresh_request, register_running_task, unregister_running_task
+from utils.task_runtime import append_task_message
 from utils.user_paths import runtime_env_scope
 
 
@@ -254,6 +256,84 @@ class SDKRuntimePathTests(unittest.TestCase):
         self.assertEqual(launch_config["max_turns"], 321)
         runtime = agent.describe_runtime()
         self.assertEqual(runtime["max_turns"], 321)
+
+    def test_add_message_resume_if_needed_uses_resume_when_stack_exists(self):
+        root = (self.base / "resume_root").resolve()
+        task_id = str((self.base / "resume_task").resolve())
+
+        with runtime_env_scope({"MLA_USER_DATA_ROOT": str(root)}):
+            manager = get_hierarchy_manager(task_id)
+            manager.set_runtime_metadata(
+                agent_system="OpenCowork",
+                agent_name="alpha_agent",
+                user_input="previous input",
+            )
+            manager._save_stack([{
+                "agent_id": "alpha_agent_demo",
+                "agent_name": "alpha_agent",
+                "parent_id": None,
+                "level": 0,
+                "user_input": "previous input",
+                "start_time": "2026-03-25T10:00:00+08:00",
+            }])
+
+            with patch("utils.task_runtime.resume_task_with_fresh", return_value=(True, "resumed")) as resume_mock:
+                with patch("utils.task_runtime.launch_task_process") as launch_mock:
+                    ok, payload = append_task_message(
+                        task_id=task_id,
+                        message="resume me",
+                        source="user",
+                        resume_if_needed=True,
+                        fallback_agent_system="OpenCowork",
+                    )
+
+        self.assertTrue(ok)
+        self.assertTrue(payload["resumed"])
+        self.assertFalse(payload["launched"])
+        resume_mock.assert_called_once()
+        launch_mock.assert_not_called()
+
+    def test_add_message_resume_if_needed_launches_new_task_when_stack_empty(self):
+        root = (self.base / "launch_after_add_root").resolve()
+        task_id = str((self.base / "launch_after_add_task").resolve())
+
+        with runtime_env_scope({"MLA_USER_DATA_ROOT": str(root), "MLA_MAX_TURNS": "77"}):
+            manager = get_hierarchy_manager(task_id)
+            manager.set_runtime_metadata(
+                agent_system="OpenCowork",
+                agent_name="alpha_agent",
+                user_input="previous input",
+            )
+            manager._save_stack([])
+
+            with patch("utils.task_runtime.launch_task_process", return_value=(True, {
+                "message": f"已在后台启动任务: {task_id}",
+                "task_id": task_id,
+                "pid": 4321,
+                "log_path": str(root / "runtime" / "launched_tasks" / "demo.log"),
+                "agent_system": "OpenCowork",
+                "agent_name": "alpha_agent",
+            })) as launch_mock:
+                ok, payload = append_task_message(
+                    task_id=task_id,
+                    message="please continue",
+                    source="user",
+                    resume_if_needed=True,
+                    fallback_agent_system="OpenCowork",
+                    env_overrides={"MLA_USER_DATA_ROOT": str(root), "MLA_MAX_TURNS": "77"},
+                )
+
+        self.assertTrue(ok)
+        self.assertFalse(payload["resumed"])
+        self.assertTrue(payload["launched"])
+        launch_mock.assert_called_once()
+        kwargs = launch_mock.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], task_id)
+        self.assertEqual(kwargs["user_input"], "please continue")
+        self.assertEqual(kwargs["agent_system"], "OpenCowork")
+        self.assertEqual(kwargs["agent_name"], "alpha_agent")
+        self.assertEqual(kwargs["config"]["user_data_root"], str(root))
+        self.assertEqual(kwargs["config"]["max_turns"], 77)
 
 
 if __name__ == "__main__":

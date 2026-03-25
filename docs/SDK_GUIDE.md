@@ -714,6 +714,12 @@ agent.add_message(
 - 给运行中的 task 插入新消息
 - 已停止 task 先追加消息，再视情况后台恢复
 
+`resume_if_needed=True` 的当前语义是：
+
+- 如果 task 仍在运行：只追加消息，不额外拉起新进程
+- 如果 task 已停止但 stack 仍存在：按原有 resume 语义后台恢复
+- 如果 task 已停止且 stack 已空：把这条新消息当作新的任务输入，直接在同一个 `task_id` 上后台启动一轮新任务
+
 ### 12.4 `start_background_task(...)`
 
 ```python
