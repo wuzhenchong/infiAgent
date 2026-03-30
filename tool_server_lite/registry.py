@@ -62,6 +62,7 @@ def _build_builtin_factories() -> Dict[str, ToolFactory]:
         StartBackgroundTaskTool,
         TaskShareContextPathTool,
         ListTaskIdsTool,
+        TaskHistorySearchTool,
     )
 
     factories: Dict[str, ToolFactory] = {
@@ -99,6 +100,7 @@ def _build_builtin_factories() -> Dict[str, ToolFactory]:
         "start_background_task": StartBackgroundTaskTool,
         "task_share_context_path": TaskShareContextPathTool,
         "list_task_ids": ListTaskIdsTool,
+        "task_history_search": TaskHistorySearchTool,
     }
 
     try:

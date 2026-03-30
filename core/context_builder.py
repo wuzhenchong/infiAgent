@@ -110,6 +110,8 @@ class ContextBuilder:
         # 2️⃣ 构建各个动态部分
         user_latest_input = self._build_user_latest_input(current)
         user_agent_history = self._build_user_agent_history(task_id, current)
+        visible_history, visible_history_count, total_history_count = self._select_user_history_entries(history)
+        history_search_hint = self._build_task_history_search_hint(visible_history_count, total_history_count)
         structured_call_info = self._build_structured_call_info(current, agent_id, task_id)
         current_thinking = self._build_current_thinking(task_id, agent_id, current)
         workspace_abs_path = task_id
@@ -151,6 +153,10 @@ class ContextBuilder:
 <用户-智能体历史交互>
 {user_agent_history}
 </用户-智能体历史交互>
+
+<历史任务检索提示>
+{history_search_hint}
+</历史任务检索提示>
 
 <当前运行智能体名称>
 {agent_name}
@@ -201,6 +207,25 @@ class ContextBuilder:
             task_input=task_input,
             context_data=context_data,
             context_text=full_context,
+        )
+
+    def _select_user_history_entries(self, history: List[Dict]) -> tuple[List[Dict], int, int]:
+        if not isinstance(history, list) or not history:
+            return [], 0, 0
+        settings = get_context_settings()
+        recent_items = settings.get("user_history_recent_items", 0)
+        if recent_items and recent_items > 0:
+            selected = history[-recent_items:]
+        else:
+            selected = history
+        return selected, len(selected), len(history)
+
+    def _build_task_history_search_hint(self, visible_count: int, total_count: int) -> str:
+        if total_count <= 0:
+            return "当前没有历史交互记录。"
+        return (
+            f"你现在能看到最近{visible_count}条历史交互信息，总交互信息有{total_count}条。"
+            "如果当前提供的历史信息不足以涵盖本次任务的相关历史，请使用 task_history_search 工具进行检索。"
         )
 
     def _build_loaded_skills_xml(self, agent_id: str) -> str:
@@ -298,20 +323,32 @@ class ContextBuilder:
         
         if not history:
             return "(无历史交互)"
-        
+        try:
+            from utils.task_history_index import sync_task_history_from_context
+            sync_task_history_from_context(task_id, context)
+        except Exception:
+            pass
 
-        
+        selected_history, visible_count, total_count = self._select_user_history_entries(history)
         compressed_history = current.get("_compressed_user_agent_history")
-        if compressed_history:
+        compressed_meta = current.get("_compressed_user_agent_history_meta") or {}
+        settings = get_context_settings()
+        threshold_tokens = settings.get("user_history_compress_threshold_tokens", 1500)
+        recent_items = settings.get("user_history_recent_items", 0)
+        if (
+            compressed_history
+            and compressed_meta.get("recent_items") == recent_items
+            and compressed_meta.get("threshold_tokens") == threshold_tokens
+            and compressed_meta.get("visible_count") == visible_count
+            and compressed_meta.get("total_count") == total_count
+        ):
             safe_print("使用已有的压缩历史交互")
             return compressed_history
-        
-        settings = get_context_settings()
-        history_tokens = self._count_tokens(json.dumps(history, ensure_ascii=False))
-        threshold_tokens = settings.get("user_history_compress_threshold_tokens", 1500)
+
+        history_tokens = self._count_tokens(json.dumps(selected_history, ensure_ascii=False))
         safe_print("未到历史交互压缩阈值")
         if history_tokens < threshold_tokens:
-            return str(history)
+            return str(selected_history)
         
         # 提取当前任务的用户输入
         current_task = ""
@@ -322,9 +359,15 @@ class ContextBuilder:
             current_task = "\n".join(user_inputs)
         
         safe_print("首次压缩历史交互...")
-        compressed_result = self._compress_user_agent_history_with_llm(history, task_id, current_task)
+        compressed_result = self._compress_user_agent_history_with_llm(selected_history, task_id, current_task)
         
         context["current"]["_compressed_user_agent_history"] = compressed_result
+        context["current"]["_compressed_user_agent_history_meta"] = {
+            "recent_items": recent_items,
+            "threshold_tokens": threshold_tokens,
+            "visible_count": visible_count,
+            "total_count": total_count,
+        }
         self.hierarchy_manager._save_context(context)
         
         return compressed_result

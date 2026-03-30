@@ -1,6 +1,6 @@
 # InfiAgent SDK Guide
 
-适用版本：建议使用最新版 `infiagent`
+适用版本：建议使用 `infiagent 3.2.1+`
 
 这份文档按当前代码实现编写，目标是让你在 `pip install infiagent` 之后，只靠这份文档就能理解：
 
@@ -491,8 +491,10 @@ models:
 ```json
 {
   "runtime": {
-    "action_window_steps": 30,
-    "thinking_interval": 30,
+    "thinking_enabled": true,
+    "thinking_steps": 30,
+    "no_tool_retry_limit": 7,
+    "visible_skills": [],
     "fresh_enabled": false,
     "fresh_interval_sec": 0
   },
@@ -502,6 +504,7 @@ models:
   },
   "context": {
     "user_history_compress_threshold_tokens": 1500,
+    "user_history_recent_items": 0,
     "structured_call_info_compress_threshold_agents": 10,
     "structured_call_info_compress_threshold_tokens": 2200
   }
@@ -510,10 +513,14 @@ models:
 
 这里最常改的是：
 
-- `runtime.action_window_steps`
-- `runtime.thinking_interval`
+- `runtime.thinking_enabled`
+- `runtime.thinking_steps`
+- `runtime.no_tool_retry_limit`
+- `runtime.visible_skills`
 - `runtime.fresh_enabled`
 - `runtime.fresh_interval_sec`
+- `context.user_history_recent_items`
+- `context.user_history_compress_threshold_tokens`
 
 如果你是 SDK 嵌入式使用，`mcp_servers=[...]` 更推荐直接在构造参数里传，而不是先写 `app_config.json`。
 
@@ -565,8 +572,10 @@ agent = infiagent(
     user_data_root="/path/to/my_agent_project/runtime",
     default_agent_system="MyAgentSystem",
     default_agent_name="alpha_agent",
-    action_window_steps=30,
-    thinking_interval=30,
+    thinking_enabled=True,
+    thinking_steps=30,
+    no_tool_retry_limit=7,
+    user_history_recent_items=0,
     max_turns=100000,
 )
 ```
@@ -582,14 +591,20 @@ agent = infiagent(
 | `tools_dir` | 指定动态工具根目录 | 默认 `<user_data_root>/tools_library` |
 | `default_agent_system` | 默认 agent system 名称 | 默认 `OpenCowork` |
 | `default_agent_name` | 默认入口 agent 名称 | 默认 `alpha_agent` |
-| `action_window_steps` | 行动窗口步数 | 同时可从 `app_config.json` / 环境变量读取 |
-| `thinking_interval` | thinking 间隔 | 同上 |
+| `thinking_enabled` | 是否启用 ThinkingAgent 模式 | `True`=Thinking 模式，`False`=ReAct 模式 |
+| `thinking_steps` | Thinking 模式下“思考后执行 N 步”的步数 | 兼容旧字段 `thinking_interval` / `action_window_steps` |
+| `no_tool_retry_limit` | Thinking 模式下，连续未调用工具的最大提醒次数 | 默认 `7` |
+| `visible_skills` | 限制当前实例对 agent 暴露的 skills 名单 | 留空表示暴露全部可见 skills |
+| `user_history_compress_threshold_tokens` | 历史任务压缩阈值 | 可按实例覆盖 |
+| `user_history_recent_items` | 注入 prompt 的最近历史任务条数 | `0` 表示保留旧行为：读取全部历史 |
 | `max_turns` | 单次 run 的最大轮次上限 | SDK 默认 `100000`，可按实例或单次 `run()` 覆盖 |
 | `fresh_enabled` | 是否启用定时 fresh | 可选 |
 | `fresh_interval_sec` | fresh 周期秒数 | 可选 |
 | `mcp_servers` | 直接注入 MCP 配置 | SDK 嵌入场景推荐 |
 | `tool_hooks` | 工具调用 hook | 见后文 |
 | `context_hooks` | 上下文构建 hook | 见后文 |
+| `llm_config` | 直接传完整 `llm_config.yaml` 对应的 dict | 与 `llm_config_path` 二选一 |
+| `model_profiles` | 直接传结构化模型配置，SDK 会自动落成兼容 YAML | 适合不想手写 `llm_config.yaml` 的集成 |
 | `seed_builtin_resources` | 是否自动种内置 agent systems / skills | 默认 `True` |
 | `direct_tools` | 是否使用进程内 direct tools | 默认 `True`，保持默认即可 |
 | `workspace` | 旧参数兼容保留 | 新语义下不要依赖它，显式传 `task_id` |
@@ -624,6 +639,8 @@ print(result)
 - `raise_on_error=True` 时，`status="error"` 不再只靠返回值判断，而会抛出 `InfiAgentRunError`
 - `stream_llm_tokens=True` 时，`on_event` / `collect_events` 会额外收到 execution / thinking 的 token 级事件；默认关闭
 - `stream_llm_tokens` 只控制 SDK 是否把 token 级事件向外透出；LLM 请求层自己的 `timeout` / `stream_timeout` / `first_chunk_timeout` 仍然由 `llm_config.yaml` 控制
+- 当 `thinking_enabled=False` 时，不会再有独立 `thinking_turns`；相应的 ReAct 反思轮会记录在 `model_outputs.execution_turns` 中，`debug_label` 为 `react_reflection`
+- 前台 `run()` 也支持按任务临时覆盖实例默认值，例如 `thinking_enabled=`、`thinking_steps=`、`no_tool_retry_limit=`、`visible_skills=`、`user_history_recent_items=`；这些显式参数优先级高于实例默认配置和 `app_config.json`
 
 也可以实时消费事件：
 
@@ -697,6 +714,19 @@ agent.fresh(
 - task 未运行但可恢复：重载配置后后台 resume
 - task 未运行且不可恢复：返回 error
 
+当前 fresh 会覆盖这些配置源：
+
+- `app_config.json` 里的 runtime / context 配置
+- `llm_config.yaml`
+- `agent_library`
+- `tools_library`
+- skills loader 缓存
+- MCP servers
+- tool hooks / context hooks
+- visible skills
+
+运行中的任务会在安全点调用 `_perform_fresh()`，重建 `ConfigLoader`、`SimpleLLMClient`、`ContextBuilder`、`ToolExecutor`；未运行但仍可恢复的任务则通过 `resume_task_with_fresh()` 用当前配置后台恢复。
+
 ### 12.3 `add_message(...)`
 
 ```python
@@ -713,6 +743,17 @@ agent.add_message(
 - 对同一任务追加需求
 - 给运行中的 task 插入新消息
 - 已停止 task 先追加消息，再视情况后台恢复
+
+`resume_if_needed=True` 的当前语义是：
+
+- 如果 task 仍在运行：只追加消息，不额外拉起新进程
+- 如果 task 已停止但 stack 仍存在：按原有 resume 语义后台恢复
+- 如果 task 已停止且 stack 已空：把这条新消息当作新的任务输入，直接在同一个 `task_id` 上后台启动一轮新任务
+
+补充说明：
+
+- “原始 resume” 的核心前提仍然是 `stack` 非空
+- `add_message(..., resume_if_needed=True)` 比原始 resume 多一层运行态判断：如果 task 还在运行，它只会追加消息，不会再单独拉起恢复线程
 
 ### 12.4 `start_background_task(...)`
 
@@ -736,15 +777,22 @@ agent.start_background_task(
 `config=` 还支持在后台启动时临时覆盖运行时参数，常见键包括：
 
 - `llm_config_path`
+- `llm_config`
+- `model_profiles`
 - `user_data_root`
 - `agent_library_dir` / `library_dir`
 - `skills_dir`
 - `tools_dir`
-- `action_window_steps`
-- `thinking_interval`
+- `thinking_enabled`
+- `thinking_steps`
+- `no_tool_retry_limit`
 - `max_turns`
 - `fresh_enabled`
 - `fresh_interval_sec`
+- `user_history_compress_threshold_tokens`
+- `user_history_recent_items`
+- `structured_call_info_compress_threshold_agents`
+- `structured_call_info_compress_threshold_tokens`
 - `mcp_servers`
 - `tool_hooks`
 - `context_hooks`
@@ -1226,8 +1274,9 @@ agent = infiagent(
     user_data_root="/path/to/my_agent_project/runtime",
     default_agent_system="MyAgentSystem",
     default_agent_name="alpha_agent",
-    action_window_steps=30,
-    thinking_interval=30,
+    thinking_enabled=True,
+    thinking_steps=30,
+    no_tool_retry_limit=7,
 )
 
 
@@ -1247,6 +1296,60 @@ agent.add_message(
     task_id=task_id,
     source="user",
     resume_if_needed=True,
+)
+```
+
+### 17.1 结构化模型配置示例
+
+如果你不想手写 `llm_config.yaml`，可以直接传 `model_profiles`：
+
+```python
+from infiagent import infiagent
+
+agent = infiagent(
+    user_data_root="/path/to/my_agent_project/runtime",
+    model_profiles={
+        "mode": "unified",
+        "unified": {
+            "provider": "openrouter",
+            "model": "openai/qwen/qwen3.5-plus-02-15",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-or-...",
+            "tool_choice": "auto",
+        },
+        "temperature": 0,
+        "max_context_window": 500000,
+        "timeout": 600,
+        "stream_timeout": 30,
+        "first_chunk_timeout": 30,
+    },
+)
+```
+
+也支持 split 模式：
+
+```python
+agent = infiagent(
+    user_data_root="/path/to/my_agent_project/runtime",
+    model_profiles={
+        "mode": "split",
+        "main": {
+            "provider": "openrouter",
+            "model": "openai/qwen/qwen3.5-plus-02-15",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-or-...",
+        },
+        "thinking": {
+            "provider": "google_official",
+            "model": "gemini-2.5-flash",
+            "api_key": "your-google-key",
+        },
+        "read_figure": {
+            "provider": "openai_official",
+            "model": "gpt-4.1-mini",
+            "api_key": "sk-...",
+        },
+    },
 )
 ```
 

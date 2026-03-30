@@ -75,6 +75,8 @@ class AgentExecutor:
 
         # 从配置中提取信息
         self.available_tools = list(agent_config.get("available_tools", []))
+        if "task_history_search" not in self.available_tools and "task_history_search" in config_loader.all_tools:
+            self.available_tools.append("task_history_search")
         self.max_turns = self._resolve_max_turns()
         requested_model = self._get_agent_model_preference("execution")
         self._inject_mcp_tools()
@@ -132,8 +134,17 @@ class AgentExecutor:
         self.latest_thinking = ""
         self.first_thinking_done = False
         runtime = get_runtime_settings()
-        self.action_window_steps = int(self.agent_config.get("action_window_steps") or runtime.get("action_window_steps", 30))
-        self.thinking_interval = int(self.agent_config.get("thinking_interval") or runtime.get("thinking_interval", self.action_window_steps))
+        self.thinking_enabled = bool(self.agent_config.get("thinking_enabled", runtime.get("thinking_enabled", True)))
+        self.thinking_steps = int(
+            self.agent_config.get("thinking_steps")
+            or runtime.get("thinking_steps", runtime.get("thinking_interval", runtime.get("action_window_steps", 30)))
+        )
+        self.action_window_steps = self.thinking_steps
+        self.thinking_interval = self.thinking_steps
+        self.no_tool_retry_limit = int(
+            self.agent_config.get("no_tool_retry_limit")
+            or runtime.get("no_tool_retry_limit", 7)
+        )
         self.fresh_enabled = runtime.get("fresh_enabled", False)
         self.fresh_interval_sec = runtime.get("fresh_interval_sec", 0)
         self.last_fresh_at = time.time()
@@ -242,7 +253,7 @@ class AgentExecutor:
             
             try:
                 # 首次thinking（初始规划）
-                if start_turn == 0 and not self.first_thinking_done:
+                if self.thinking_enabled and start_turn == 0 and not self.first_thinking_done:
                     thinking_result = self._trigger_thinking(
                         task_id, 
                         user_input, 
@@ -288,6 +299,17 @@ class AgentExecutor:
                     # 从 action_history 构建标准 messages 数组
                     messages = self._build_messages_from_action_history()
                     
+                    # 无 thinking 模式：在动作调用前先进行一轮 ReAct 反思（纯文本，不调用工具）
+                    if not self.thinking_enabled:
+                        self._run_react_reflection(
+                            task_id=task_id,
+                            task_input=user_input,
+                            system_prompt=full_system_prompt,
+                            messages=messages,
+                            turn=turn,
+                        )
+                        messages = self._build_messages_from_action_history()
+
                     # 调用LLM（使用标准 messages 格式）
                     llm_response = self._execute_llm_call(full_system_prompt, messages, task_id=task_id)
                     
@@ -303,33 +325,32 @@ class AgentExecutor:
                         return error_result
 
                     if not llm_response.tool_calls:
-                        # 强制工具调用机制
+                        if self.thinking_enabled:
+                            if max_tool_try < self.no_tool_retry_limit:
+                                max_tool_try += 1
+                                self.event_emitter.dispatch(CliDisplayEvent(
+                                    message=f"⚠️ LLM未调用工具，第{max_tool_try}/{self.no_tool_retry_limit}次提醒",
+                                    style='warning'
+                                ))
+                                self.action_history.append({
+                                    "_turn": self.llm_turn_counter,
+                                    "tool_name": "_no_tool_call",
+                                    "arguments": {},
+                                    "result": {
+                                        "status": "error",
+                                        "output": f"第{max_tool_try}次：LLM未调用工具，请在下一轮中必须调用工具"
+                                    },
+                                    "assistant_content": llm_response.output or "",
+                                    "reasoning_content": llm_response.reasoning_content or "",
+                                })
+                                self.llm_turn_counter += 1
+                                self._save_state(task_id, user_input, turn)
+                                continue
 
-                        if max_tool_try < 5:
-                            max_tool_try += 1
-                            self.event_emitter.dispatch(CliDisplayEvent(
-                                message=f"⚠️ LLM未调用工具，第{max_tool_try}/5次提醒", 
-                                style='warning'
-                            ))
-                            self.action_history.append({
-                                "_turn": self.llm_turn_counter,
-                                "tool_name": "_no_tool_call",
-                                "arguments": {},
-                                "result": {
-                                    "status": "error",
-                                    "output": f"第{max_tool_try}次：LLM未调用工具，请在下一轮中必须调用工具"
-                                },
-                                "assistant_content": llm_response.output or ""
-                            })
-                            self.llm_turn_counter += 1
-                            self._save_state(task_id, user_input, turn)
-                            continue
-                        else:
-                            # 5次后仍不调用，触发thinking并报错
                             thinking_result = self._trigger_thinking(
-                                task_id, 
-                                user_input, 
-                                is_initial=False, 
+                                task_id,
+                                user_input,
+                                is_initial=False,
                                 is_forced=True
                             )
                             error_output = thinking_result or "多次未调用工具"
@@ -343,6 +364,28 @@ class AgentExecutor:
                             self.event_emitter.dispatch(AgentEndEvent(status='error', result=error_result))
                             self.event_emitter.dispatch(ThinkingFailEvent(agent_name=self.agent_name, error_message=f"[{self.agent_name}] 强制thinking: {thinking_result if thinking_result else '分析失败'}"))
                             return error_result
+
+                        text_response = (llm_response.output or "").strip()
+                        if text_response:
+                            self._record_text_response(
+                                tool_name="_assistant_text",
+                                text=text_response,
+                                llm_turn=self.llm_turn_counter,
+                                reasoning_content=llm_response.reasoning_content or "",
+                            )
+                            self.llm_turn_counter += 1
+                            self._save_state(task_id, user_input, turn)
+                            continue
+
+                        error_result = {
+                            "status": "error",
+                            "output": "",
+                            "error_information": "ReAct模式下模型既未调用工具，也未返回可用文本"
+                        }
+                        error_result = self._with_model_outputs(error_result)
+                        self.hierarchy_manager.pop_agent(self.agent_id, str(error_result))
+                        self.event_emitter.dispatch(AgentEndEvent(status='error', result=error_result))
+                        return error_result
                     # 重置计数器（成功调用了工具）
                     max_tool_try = 0
 
@@ -372,7 +415,7 @@ class AgentExecutor:
                     # 检查是否该触发thinking（每 N 轮工具调用）
                     # 用整除判断是否跨过了 thinking_interval 边界（避免多 tool_call 跳过边界值）
                     crossed_boundary = (counter_before // self.thinking_interval) < (self.tool_call_counter // self.thinking_interval)
-                    if self.tool_call_counter > 0 and crossed_boundary:
+                    if self.thinking_enabled and self.tool_call_counter > 0 and crossed_boundary:
                         thinking_result = self._trigger_thinking(task_id, user_input, is_initial=False)
                         if thinking_result:
                             self.latest_thinking = thinking_result
@@ -381,7 +424,7 @@ class AgentExecutor:
 
                     # 检查动作窗口是否跨过边界：thinking 完成后再清空当前可见动作窗口
                     crossed_action_window = (counter_before // self.action_window_steps) < (self.tool_call_counter // self.action_window_steps)
-                    if self.tool_call_counter > 0 and crossed_action_window:
+                    if self.thinking_enabled and self.tool_call_counter > 0 and crossed_action_window:
                         self.action_history = []
                         self.llm_turn_counter = 0
                 
@@ -477,6 +520,15 @@ class AgentExecutor:
                     "role": "user",
                     "content": f"[Previous actions summary]\n{action['result']['output']}"
                 })
+                continue
+
+            if tool_name in {"_react_reflection", "_assistant_text"}:
+                assistant_content = action.get("assistant_content", "") or action.get("result", {}).get("output", "")
+                if assistant_content:
+                    assistant_msg = {"role": "assistant", "content": assistant_content}
+                    if action.get("reasoning_content"):
+                        assistant_msg["reasoning_content"] = action["reasoning_content"]
+                    messages.append(assistant_msg)
                 continue
             
             # 特殊处理：LLM 未调用工具
@@ -597,7 +649,17 @@ class AgentExecutor:
     def _format_kimi_history_tool_call_id(tool_name: str, sequence_index: int) -> str:
         safe_tool_name = str(tool_name or "").strip() or "tool"
         return f"functions.{safe_tool_name}:{max(0, int(sequence_index))}"
-    def _execute_llm_call(self, system_prompt: str, messages: List[Dict] = None, task_id: Optional[str] = None):
+    def _execute_llm_call(
+        self,
+        system_prompt: str,
+        messages: List[Dict] = None,
+        task_id: Optional[str] = None,
+        *,
+        tool_list: Optional[List[str]] = None,
+        tool_choice: Optional[str] = None,
+        debug_label: str = "execution",
+        stream_tokens: bool = True,
+    ):
         """
         执行LLM调用并分发事件
         
@@ -615,7 +677,8 @@ class AgentExecutor:
             system_prompt=system_prompt
         ))
         
-        execution_tool_choice = self.llm_client.resolve_tool_choice(
+        effective_tool_list = list(self.available_tools if tool_list is None else tool_list)
+        execution_tool_choice = tool_choice or self.llm_client.resolve_tool_choice(
             category="execution",
             model=self.execution_model,
         )
@@ -625,21 +688,23 @@ class AgentExecutor:
             history=messages,
             model=self.execution_model,
             system_prompt=system_prompt,
-            tool_list=self.available_tools,
+            tool_list=effective_tool_list,
             tool_choice=execution_tool_choice,
             max_tokens=max_tokens_override,
             emit_tokens="token",  # 主 Agent 调用：流式发送 content token
             debug_task_id=task_id,
-            debug_label="execution",
+            debug_label=debug_label,
             stream_callback=self._build_llm_stream_callback(
                 stream_group="llm",
                 agent_name=self.agent_name,
                 model=self.execution_model,
-            ) if self.stream_llm_tokens else None,
+            ) if self.stream_llm_tokens and stream_tokens else None,
         )
 
         llm_record = {
             "turn_index": self.llm_turn_counter,
+            "debug_label": debug_label,
+            "tool_choice": execution_tool_choice,
             "model": llm_response.model or self.execution_model,
             "content": llm_response.output or "",
             "reasoning_content": llm_response.reasoning_content or "",
@@ -664,6 +729,82 @@ class AgentExecutor:
             finish_reason=llm_record["finish_reason"],
         ))
         return llm_response
+
+    def _record_text_response(
+        self,
+        *,
+        tool_name: str,
+        text: str,
+        llm_turn: int,
+        reasoning_content: str = "",
+    ) -> None:
+        action_record = {
+            "_turn": llm_turn,
+            "tool_name": tool_name,
+            "arguments": {},
+            "result": {
+                "status": "success",
+                "output": text,
+            },
+            "assistant_content": text,
+            "reasoning_content": reasoning_content,
+            "_has_image": False,
+            "_image_base64": None,
+        }
+        fact_record = dict(action_record)
+        fact_record["_image_base64"] = None
+        self.action_history_fact.append(fact_record)
+        self.action_history.append(action_record)
+
+    def _build_react_reflection_prompt(self) -> str:
+        tool_names = ", ".join(self.available_tools) if self.available_tools else "(无可用工具)"
+        return (
+            "你当前处于 ReAct 反思阶段。请先简短输出当前进展、下一步最应该采取的动作、"
+            "以及是否需要使用 task_history_search 检索历史任务。"
+            "只输出纯文本思考，不要调用工具，不要输出 JSON/XML/markdown 标记。"
+            f"可用工具如下：{tool_names}"
+        )
+
+    def _run_react_reflection(
+        self,
+        *,
+        task_id: str,
+        task_input: str,
+        system_prompt: str,
+        messages: List[Dict],
+        turn: int,
+    ) -> None:
+        reflection_messages = list(messages or [])
+        reflection_messages.append({
+            "role": "user",
+            "content": self._build_react_reflection_prompt(),
+        })
+        llm_response = self._execute_llm_call(
+            system_prompt,
+            reflection_messages,
+            task_id=task_id,
+            tool_list=[],
+            tool_choice="none",
+            debug_label="react_reflection",
+            stream_tokens=False,
+        )
+        if llm_response.status != "success":
+            raise Exception(llm_response.error_information or "ReAct reflection failed")
+        reflection_text = str(llm_response.output or "").strip()
+        if not reflection_text:
+            return
+        self._record_text_response(
+            tool_name="_react_reflection",
+            text=reflection_text,
+            llm_turn=self.llm_turn_counter,
+            reasoning_content=llm_response.reasoning_content or "",
+        )
+        self.llm_turn_counter += 1
+        self._save_state(task_id, task_input, turn)
+        self.event_emitter.dispatch(CliDisplayEvent(
+            message=f"🤔 ReAct反思已更新: {reflection_text[:160]}",
+            style='info'
+        ))
 
     def _execute_tool_call(self, tool_call: Dict, task_id: str, user_input: str, turn: int,
                           assistant_content: str = "", reasoning_content: str = "",
@@ -883,8 +1024,17 @@ class AgentExecutor:
 
         # 重新读取运行时参数
         runtime = get_runtime_settings()
-        self.action_window_steps = int(self.agent_config.get("action_window_steps") or runtime.get("action_window_steps", 30))
-        self.thinking_interval = int(self.agent_config.get("thinking_interval") or runtime.get("thinking_interval", self.action_window_steps))
+        self.thinking_enabled = bool(self.agent_config.get("thinking_enabled", runtime.get("thinking_enabled", True)))
+        self.thinking_steps = int(
+            self.agent_config.get("thinking_steps")
+            or runtime.get("thinking_steps", runtime.get("thinking_interval", runtime.get("action_window_steps", 30)))
+        )
+        self.action_window_steps = self.thinking_steps
+        self.thinking_interval = self.thinking_steps
+        self.no_tool_retry_limit = int(
+            self.agent_config.get("no_tool_retry_limit")
+            or runtime.get("no_tool_retry_limit", 7)
+        )
         self.fresh_enabled = runtime.get("fresh_enabled", False)
         self.fresh_interval_sec = runtime.get("fresh_interval_sec", 0)
         self.last_fresh_at = time.time()
@@ -894,6 +1044,8 @@ class AgentExecutor:
         self.config_loader = loader_cls(self.config_loader.agent_system_name)
         self.agent_config = self.config_loader.get_tool_config(self.agent_name)
         self.available_tools = list(self.agent_config.get("available_tools", []))
+        if "task_history_search" not in self.available_tools and "task_history_search" in self.config_loader.all_tools:
+            self.available_tools.append("task_history_search")
         self._inject_mcp_tools()
 
         self.llm_client = SimpleLLMClient()
@@ -1166,7 +1318,8 @@ class AgentExecutor:
     def _build_model_outputs_payload(self) -> Dict[str, Any]:
         execution_traces = list(getattr(self, "execution_traces", []) or [])
         thinking_traces = list(getattr(self, "thinking_traces", []) or [])
-        last_execution = execution_traces[-1] if execution_traces else None
+        execution_only = [item for item in execution_traces if str(item.get("debug_label") or "execution") == "execution"]
+        last_execution = execution_only[-1] if execution_only else (execution_traces[-1] if execution_traces else None)
         last_thinking = thinking_traces[-1] if thinking_traces else None
         return {
             "execution_turns": execution_traces,

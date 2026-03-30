@@ -780,12 +780,7 @@ async function loadSettings() {
   document.getElementById('setting-multimodal').checked = c.multimodal !== false;
   document.getElementById('setting-compressor-multimodal').checked = c.compressor_multimodal !== false;
   
-  // Models (array → newline-separated)
-  document.getElementById('setting-models').value = formatModelEntries(c.models || []);
-  document.getElementById('setting-figure-models').value = formatModelEntries(c.figure_models || []);
-  document.getElementById('setting-compressor-models').value = formatModelEntries(c.compressor_models || []);
-  document.getElementById('setting-read-figure-models').value = formatModelEntries(c.read_figure_models || []);
-  document.getElementById('setting-thinking-models').value = formatModelEntries(c.thinking_models || []);
+  loadModelEditorSettings(c);
 
   // Raw yaml
   if (rawYamlTextarea) rawYamlTextarea.value = result.raw_yaml || '';
@@ -819,26 +814,35 @@ async function loadSettings() {
       extraEnvEl.value = lines.join('\n');
     }
     if (marketUrlEl) marketUrlEl.value = market.base_url || '';
-    const actionWindowEl = document.getElementById('setting-action-window-steps');
-    const thinkingIntervalEl = document.getElementById('setting-thinking-interval');
+    const thinkingEnabledEl = document.getElementById('setting-thinking-enabled');
+    const thinkingStepsEl = document.getElementById('setting-thinking-steps');
+    const noToolRetryLimitEl = document.getElementById('setting-no-tool-retry-limit');
     const maxTurnsEl = document.getElementById('setting-max-turns');
     const freshEnabledEl = document.getElementById('setting-fresh-enabled');
     const freshIntervalEl = document.getElementById('setting-fresh-interval-sec');
     const userHistoryThresholdEl = document.getElementById('setting-user-history-threshold');
+    const userHistoryRecentItemsEl = document.getElementById('setting-user-history-recent-items');
     const structuredAgentThresholdEl = document.getElementById('setting-structured-call-agent-threshold');
     const structuredTokenThresholdEl = document.getElementById('setting-structured-call-token-threshold');
     const mcpServersEl = document.getElementById('setting-mcp-servers');
-    if (actionWindowEl) actionWindowEl.value = runtime.action_window_steps ?? 30;
-    if (thinkingIntervalEl) thinkingIntervalEl.value = runtime.thinking_interval ?? runtime.action_window_steps ?? 30;
+    const visibleSkillsEl = document.getElementById('setting-visible-skills');
+    if (thinkingEnabledEl) thinkingEnabledEl.checked = runtime.thinking_enabled !== false;
+    if (thinkingStepsEl) thinkingStepsEl.value = runtime.thinking_steps ?? runtime.thinking_interval ?? runtime.action_window_steps ?? 30;
+    if (noToolRetryLimitEl) noToolRetryLimitEl.value = runtime.no_tool_retry_limit ?? 7;
     if (maxTurnsEl) maxTurnsEl.value = runtime.max_turns ?? 100000;
     if (freshEnabledEl) freshEnabledEl.checked = !!runtime.fresh_enabled;
     if (freshIntervalEl) freshIntervalEl.value = runtime.fresh_interval_sec ?? 0;
     if (userHistoryThresholdEl) userHistoryThresholdEl.value = context.user_history_compress_threshold_tokens ?? 1500;
+    if (userHistoryRecentItemsEl) userHistoryRecentItemsEl.value = context.user_history_recent_items ?? 0;
     if (structuredAgentThresholdEl) structuredAgentThresholdEl.value = context.structured_call_info_compress_threshold_agents ?? 10;
     if (structuredTokenThresholdEl) structuredTokenThresholdEl.value = context.structured_call_info_compress_threshold_tokens ?? 2200;
     if (mcpServersEl) {
       const lines = Array.isArray(mcp.servers) ? mcp.servers.map(item => JSON.stringify(item)) : [];
       mcpServersEl.value = lines.join('\n');
+    }
+    if (visibleSkillsEl) {
+      const lines = Array.isArray(runtime.visible_skills) ? runtime.visible_skills : [];
+      visibleSkillsEl.value = lines.join('\n');
     }
   }
   
@@ -909,6 +913,7 @@ settingsSaveBtn.addEventListener('click', async () => {
     const yamlText = (rawYamlTextarea?.value || '').trimEnd() + '\n';
     const result = await window.api.saveSettings(yamlText);
     if (result.success) {
+      await loadSettings();
       settingsStatus.textContent = 'YAML saved successfully';
       settingsStatus.style.color = '#5a9a6a';
     } else {
@@ -926,6 +931,7 @@ settingsSaveBtn.addEventListener('click', async () => {
     const extraPathText = document.getElementById('setting-extra-path')?.value || '';
     const extraEnvText = document.getElementById('setting-extra-env')?.value || '';
     const marketUrl = document.getElementById('setting-market-url')?.value || '';
+    const visibleSkillsText = document.getElementById('setting-visible-skills')?.value || '';
 
     const extra_path = extraPathText.split('\n').map(s => s.trim()).filter(Boolean);
     const extra_env = {};
@@ -961,17 +967,30 @@ settingsSaveBtn.addEventListener('click', async () => {
       }
     }
 
+    const visible_skills = visibleSkillsText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const thinkingEnabled = !!document.getElementById('setting-thinking-enabled')?.checked;
+    const thinkingSteps = readPositiveNumber(document.getElementById('setting-thinking-steps')?.value, 30);
+
     const appCfg = {
       env: { shell_mode: mode, command_mode: commandMode, extra_path, extra_env },
       runtime: {
-        action_window_steps: readPositiveNumber(document.getElementById('setting-action-window-steps')?.value, 30),
-        thinking_interval: readPositiveNumber(document.getElementById('setting-thinking-interval')?.value, 30),
+        action_window_steps: thinkingSteps,
+        thinking_interval: thinkingSteps,
+        thinking_enabled: thinkingEnabled,
+        thinking_steps: thinkingSteps,
+        no_tool_retry_limit: readPositiveNumber(document.getElementById('setting-no-tool-retry-limit')?.value, 7),
+        visible_skills,
         max_turns: readPositiveNumber(document.getElementById('setting-max-turns')?.value, 100000),
         fresh_enabled: !!document.getElementById('setting-fresh-enabled')?.checked,
         fresh_interval_sec: Number(document.getElementById('setting-fresh-interval-sec')?.value) || 0
       },
       context: {
         user_history_compress_threshold_tokens: readNonNegativeNumber(document.getElementById('setting-user-history-threshold')?.value, 1500),
+        user_history_recent_items: readNonNegativeNumber(document.getElementById('setting-user-history-recent-items')?.value, 0),
         structured_call_info_compress_threshold_agents: readPositiveNumber(document.getElementById('setting-structured-call-agent-threshold')?.value, 10),
         structured_call_info_compress_threshold_tokens: readNonNegativeNumber(document.getElementById('setting-structured-call-token-threshold')?.value, 2200)
       },
@@ -981,6 +1000,7 @@ settingsSaveBtn.addEventListener('click', async () => {
 
     const res = await window.api.saveAppConfig(appCfg);
     if (res?.success) {
+      await loadSettings();
       settingsStatus.textContent = 'Environment settings saved';
       settingsStatus.style.color = '#5a9a6a';
     } else {
@@ -991,13 +1011,7 @@ settingsSaveBtn.addEventListener('click', async () => {
     return;
   }
 
-  const modelsText = document.getElementById('setting-models').value.trim();
-  const figureModelsText = document.getElementById('setting-figure-models').value.trim();
-  const compressorModelsText = document.getElementById('setting-compressor-models').value.trim();
-  const readFigureModelsText = document.getElementById('setting-read-figure-models').value.trim();
-  const thinkingModelsText = document.getElementById('setting-thinking-models').value.trim();
-  
-  const config = {
+  const config = buildModelEditorConfig({
     ...lastLoadedSettingsConfig,
     temperature: Number(document.getElementById('setting-temperature').value) || 0,
     max_tokens: Number(document.getElementById('setting-max-tokens').value) || 0,
@@ -1007,19 +1021,15 @@ settingsSaveBtn.addEventListener('click', async () => {
     timeout: Number(document.getElementById('setting-timeout').value) || 600,
     stream_timeout: Number(document.getElementById('setting-stream-timeout').value) || 30,
     first_chunk_timeout: Number(document.getElementById('setting-first-chunk-timeout').value) || 30,
-    models: parseModelEntries(modelsText),
-    figure_models: parseModelEntries(figureModelsText),
-    compressor_models: parseModelEntries(compressorModelsText),
-    read_figure_models: parseModelEntries(readFigureModelsText),
-    thinking_models: parseModelEntries(thinkingModelsText),
     multimodal: document.getElementById('setting-multimodal').checked,
     compressor_multimodal: document.getElementById('setting-compressor-multimodal').checked
-  };
+  });
   
   const result = await window.api.saveSettings(config);
   if (result.success) {
     settingsStatus.textContent = 'Settings saved successfully';
     settingsStatus.style.color = '#5a9a6a';
+    await loadSettings();
     
     // Sync agent system select in sidebar
     const agentSys = document.getElementById('setting-agent-system').value;
@@ -1057,34 +1067,334 @@ function setMarketStatus(text, isError = false) {
   marketStatus.style.color = isError ? '#c75450' : '#5a9a6a';
 }
 
-function formatModelEntries(value) {
-  if (!Array.isArray(value)) return '';
-  return value.map(item => {
-    if (typeof item === 'string') return item;
-    try {
-      return JSON.stringify(item);
-    } catch (_) {
-      return String(item ?? '');
-    }
-  }).join('\n');
+const MODEL_EDITOR_SLOT_CONFIG_KEYS = {
+  shared: null,
+  main: 'models',
+  read: 'read_figure_models',
+  figure: 'figure_models',
+  compressor: 'compressor_models',
+  thinking: 'thinking_models'
+};
+
+const MODEL_EDITOR_PROVIDER_OPTIONS = `
+  <option value="openrouter">OpenRouter</option>
+  <option value="openai_compatible">OpenAI-compatible API</option>
+  <option value="openai_official">OpenAI Official</option>
+  <option value="google_official">Google Official</option>
+  <option value="anthropic_official">Anthropic Official</option>
+  <option value="local_openai_compatible">Local / Keyless OpenAI-compatible</option>
+`;
+
+let modelEditorEntryCounter = 0;
+let modelEditorState = createEmptyModelEditorState();
+
+function createEmptyModelEditorState() {
+  return {
+    shared: [],
+    main: [],
+    read: [],
+    figure: [],
+    compressor: [],
+    thinking: []
+  };
 }
 
-function parseModelEntries(text) {
-  return String(text || '')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      if (line.startsWith('{') || line.startsWith('[')) {
-        try {
-          return JSON.parse(line);
-        } catch (_) {
-          return line;
-        }
-      }
-      return line;
-    });
+function nextModelEditorId() {
+  modelEditorEntryCounter += 1;
+  return `model-entry-${modelEditorEntryCounter}`;
 }
+
+function inferModelProviderKind(modelName, entryBaseUrl, globalBaseUrl, hasApiKey) {
+  const name = String(modelName || '').trim();
+  const effectiveBaseUrl = String(entryBaseUrl || globalBaseUrl || '').trim().toLowerCase();
+  if (name.startsWith('openrouter/')) return 'openrouter';
+  if (effectiveBaseUrl.includes('openrouter.ai')) return 'openrouter';
+  if (name.startsWith('google/')) return 'google_official';
+  if (name.startsWith('anthropic/')) return 'anthropic_official';
+  if (name.startsWith('openai/')) {
+    if (entryBaseUrl) return hasApiKey ? 'openai_compatible' : 'local_openai_compatible';
+    return 'openai_official';
+  }
+  if (entryBaseUrl) return hasApiKey ? 'openai_compatible' : 'local_openai_compatible';
+  return 'openai_official';
+}
+
+function stripModelNameForProvider(providerKind, modelName, entryBaseUrl, globalBaseUrl) {
+  let name = String(modelName || '').trim();
+  const effectiveBaseUrl = String(entryBaseUrl || globalBaseUrl || '').trim().toLowerCase();
+  if (!name) return '';
+  if (providerKind === 'openrouter') {
+    if (name.startsWith('openrouter/')) return name.slice('openrouter/'.length);
+    if (effectiveBaseUrl.includes('openrouter.ai') && name.startsWith('openai/') && name.slice('openai/'.length).includes('/')) {
+      return name.slice('openai/'.length);
+    }
+    return name;
+  }
+  if (providerKind === 'google_official' && name.startsWith('google/')) return name.slice('google/'.length);
+  if (providerKind === 'anthropic_official' && name.startsWith('anthropic/')) return name.slice('anthropic/'.length);
+  if (name.startsWith('openai/')) return name.slice('openai/'.length);
+  return name;
+}
+
+function normalizeModelNameForProvider(providerKind, modelName) {
+  const raw = String(modelName || '').trim();
+  if (!raw) return '';
+  if (providerKind === 'openrouter') {
+    return raw.startsWith('openrouter/') ? raw : `openrouter/${raw}`;
+  }
+  const expectedPrefix = {
+    openai_compatible: 'openai/',
+    openai_official: 'openai/',
+    google_official: 'google/',
+    anthropic_official: 'anthropic/',
+    local_openai_compatible: 'openai/'
+  }[providerKind] || 'openai/';
+  if (raw.startsWith(expectedPrefix)) return raw;
+  return `${expectedPrefix}${raw.replace(/^(openrouter|openai|google|anthropic)\//, '')}`;
+}
+
+function makeBlankModelEditorEntry() {
+  return {
+    id: nextModelEditorId(),
+    provider: 'openrouter',
+    model: '',
+    source: 'default',
+    base_url: '',
+    api_key: '',
+    tool_choice: ''
+  };
+}
+
+function deserializeModelEditorEntry(rawEntry, globalBaseUrl) {
+  const isObject = rawEntry && typeof rawEntry === 'object' && !Array.isArray(rawEntry);
+  const modelName = isObject ? String(rawEntry.name || '') : String(rawEntry || '');
+  const baseUrl = isObject ? String(rawEntry.base_url || '') : '';
+  const apiKey = isObject ? String(rawEntry.api_key || '') : '';
+  const toolChoice = isObject ? String(rawEntry.tool_choice || '') : '';
+  const provider = inferModelProviderKind(modelName, baseUrl, globalBaseUrl, !!apiKey);
+  return {
+    id: nextModelEditorId(),
+    provider,
+    model: stripModelNameForProvider(provider, modelName, baseUrl, globalBaseUrl),
+    source: (baseUrl || apiKey) ? 'custom' : 'default',
+    base_url: baseUrl,
+    api_key: apiKey,
+    tool_choice: toolChoice
+  };
+}
+
+function serializeModelEditorComparable(entry) {
+  return JSON.stringify({
+    provider: String(entry?.provider || '').trim(),
+    model: String(entry?.model || '').trim(),
+    source: String(entry?.source || 'default').trim(),
+    base_url: String(entry?.base_url || '').trim(),
+    api_key: String(entry?.api_key || '').trim(),
+    tool_choice: String(entry?.tool_choice || '').trim()
+  });
+}
+
+function cloneModelEditorEntry(entry) {
+  return {
+    id: nextModelEditorId(),
+    provider: entry.provider,
+    model: entry.model,
+    source: entry.source,
+    base_url: entry.base_url,
+    api_key: entry.api_key,
+    tool_choice: entry.tool_choice
+  };
+}
+
+function computeSharedModelEntries(slotEntries) {
+  const orderedBase = slotEntries.main || [];
+  if (!orderedBase.length) return [];
+  const otherSlots = ['read', 'figure', 'compressor', 'thinking'];
+  return orderedBase
+    .filter((entry) => otherSlots.every((slot) => (slotEntries[slot] || []).some((candidate) => serializeModelEditorComparable(candidate) === serializeModelEditorComparable(entry))))
+    .map((entry) => cloneModelEditorEntry(entry));
+}
+
+function createModelEntryPayload(entry) {
+  const resolvedName = normalizeModelNameForProvider(entry.provider, entry.model);
+  if (!resolvedName) return null;
+  const sourceMode = entry.source === 'custom' ? 'custom' : 'default';
+  const payload = { name: resolvedName };
+  if (sourceMode === 'custom' && String(entry.base_url || '').trim()) payload.base_url = String(entry.base_url || '').trim();
+  if (sourceMode === 'custom' && String(entry.api_key || '').trim()) payload.api_key = String(entry.api_key || '').trim();
+  if (String(entry.tool_choice || '').trim()) payload.tool_choice = String(entry.tool_choice || '').trim();
+  return Object.keys(payload).length === 1 ? payload.name : payload;
+}
+
+function buildModelEditorConfig(baseConfig) {
+  const config = { ...baseConfig };
+  const sharedPayload = modelEditorState.shared.map(createModelEntryPayload).filter(Boolean);
+  Object.entries(MODEL_EDITOR_SLOT_CONFIG_KEYS).forEach(([slotKey, configKey]) => {
+    if (!configKey) return;
+    const slotPayload = (modelEditorState[slotKey] || []).map(createModelEntryPayload).filter(Boolean);
+    config[configKey] = [...sharedPayload, ...slotPayload];
+  });
+  return config;
+}
+
+function getModelEditorEntry(slotKey, entryId) {
+  return (modelEditorState[slotKey] || []).find((entry) => entry.id === entryId);
+}
+
+function renderModelEditorEntry(slotKey, entry) {
+  const resolvedName = normalizeModelNameForProvider(entry.provider, entry.model);
+  const customVisible = entry.source === 'custom' ? '' : 'display:none;';
+  return `
+    <div class="model-entry-card" data-slot="${slotKey}" data-id="${entry.id}">
+      <div class="model-entry-topbar">
+        <div class="form-group form-half">
+          <label class="form-label">Provider</label>
+          <select class="form-input" data-model-field="provider">
+            ${MODEL_EDITOR_PROVIDER_OPTIONS}
+          </select>
+        </div>
+        <div class="form-group form-half">
+          <label class="form-label">Source</label>
+          <select class="form-input" data-model-field="source">
+            <option value="default">Use default URL / Key</option>
+            <option value="custom">Custom URL / Key</option>
+          </select>
+        </div>
+        <div class="form-group form-half">
+          <label class="form-label">Tool Choice</label>
+          <select class="form-input" data-model-field="tool_choice">
+            <option value="">Default</option>
+            <option value="required">required</option>
+            <option value="auto">auto</option>
+            <option value="none">none</option>
+          </select>
+        </div>
+        <div class="model-entry-actions">
+          <button class="btn-secondary" type="button" data-model-action="delete">Delete</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Model Name</label>
+        <input type="text" class="form-input" data-model-field="model" placeholder="For OpenRouter use vendor/model, e.g. google/gemini-3-flash-preview" value="${escapeHtml(entry.model)}">
+        <div class="model-entry-preview">Resolved model id: <code>${escapeHtml(resolvedName || '(empty)')}</code></div>
+      </div>
+      <div class="form-row model-entry-custom-source" style="${customVisible}">
+        <div class="form-group form-half">
+          <label class="form-label">Custom Base URL</label>
+          <input type="text" class="form-input" data-model-field="base_url" placeholder="https://..." value="${escapeHtml(entry.base_url)}">
+        </div>
+        <div class="form-group form-half">
+          <label class="form-label">Custom API Key</label>
+          <input type="text" class="form-input" data-model-field="api_key" placeholder="sk-..." value="${escapeHtml(entry.api_key)}">
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderModelEditorSlot(slotKey) {
+  const container = document.getElementById(`model-${slotKey}-list`);
+  if (!container) return;
+  const entries = modelEditorState[slotKey] || [];
+  if (!entries.length) {
+    container.innerHTML = '<div class="model-slot-empty">No models configured for this section.</div>';
+    return;
+  }
+  container.innerHTML = entries.map((entry) => renderModelEditorEntry(slotKey, entry)).join('');
+  entries.forEach((entry) => {
+    const card = container.querySelector(`[data-id="${entry.id}"]`);
+    if (!card) return;
+    const providerEl = card.querySelector('[data-model-field="provider"]');
+    const sourceEl = card.querySelector('[data-model-field="source"]');
+    const toolChoiceEl = card.querySelector('[data-model-field="tool_choice"]');
+    if (providerEl) providerEl.value = entry.provider;
+    if (sourceEl) sourceEl.value = entry.source;
+    if (toolChoiceEl) toolChoiceEl.value = entry.tool_choice || '';
+  });
+}
+
+function renderAllModelEditorSlots() {
+  ['shared', 'main', 'read', 'figure', 'compressor', 'thinking'].forEach(renderModelEditorSlot);
+}
+
+function loadModelEditorSettings(config) {
+  const globalBaseUrl = String(config?.base_url || '').trim();
+  const parsedSlots = {
+    main: Array.isArray(config?.models) ? config.models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : [],
+    read: Array.isArray(config?.read_figure_models) ? config.read_figure_models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : [],
+    figure: Array.isArray(config?.figure_models) ? config.figure_models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : [],
+    compressor: Array.isArray(config?.compressor_models) ? config.compressor_models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : [],
+    thinking: Array.isArray(config?.thinking_models) ? config.thinking_models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : []
+  };
+  const shared = computeSharedModelEntries(parsedSlots);
+  const sharedKeys = new Set(shared.map((entry) => serializeModelEditorComparable(entry)));
+  modelEditorState = {
+    shared,
+    main: parsedSlots.main.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry),
+    read: parsedSlots.read.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry),
+    figure: parsedSlots.figure.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry),
+    compressor: parsedSlots.compressor.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry),
+    thinking: parsedSlots.thinking.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry)
+  };
+  renderAllModelEditorSlots();
+}
+
+function addModelEditorEntry(slotKey) {
+  if (!modelEditorState[slotKey]) return;
+  modelEditorState[slotKey].push(makeBlankModelEditorEntry());
+  renderModelEditorSlot(slotKey);
+}
+
+function bindModelEditorList(slotKey) {
+  const container = document.getElementById(`model-${slotKey}-list`);
+  if (!container) return;
+  container.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-model-action="delete"]');
+    if (!button) return;
+    const card = button.closest('.model-entry-card');
+    if (!card) return;
+    const entryId = card.dataset.id;
+    modelEditorState[slotKey] = (modelEditorState[slotKey] || []).filter((entry) => entry.id !== entryId);
+    renderModelEditorSlot(slotKey);
+  });
+  container.addEventListener('input', (event) => {
+    const field = event.target?.dataset?.modelField;
+    if (!field) return;
+    const card = event.target.closest('.model-entry-card');
+    if (!card) return;
+    const entry = getModelEditorEntry(slotKey, card.dataset.id);
+    if (!entry) return;
+    entry[field] = event.target.value;
+    if (field === 'model' || field === 'base_url' || field === 'api_key') {
+      const preview = card.querySelector('.model-entry-preview code');
+      if (preview) preview.textContent = normalizeModelNameForProvider(entry.provider, entry.model) || '(empty)';
+    }
+  });
+  container.addEventListener('change', (event) => {
+    const field = event.target?.dataset?.modelField;
+    if (!field) return;
+    const card = event.target.closest('.model-entry-card');
+    if (!card) return;
+    const entry = getModelEditorEntry(slotKey, card.dataset.id);
+    if (!entry) return;
+    entry[field] = event.target.value;
+    if (field === 'source' || field === 'provider') {
+      renderModelEditorSlot(slotKey);
+    }
+  });
+}
+
+[
+  ['shared', 'add-shared-model-btn'],
+  ['main', 'add-main-model-btn'],
+  ['read', 'add-read-model-btn'],
+  ['figure', 'add-figure-model-btn'],
+  ['compressor', 'add-compressor-model-btn'],
+  ['thinking', 'add-thinking-model-btn']
+].forEach(([slotKey, buttonId]) => {
+  document.getElementById(buttonId)?.addEventListener('click', () => addModelEditorEntry(slotKey));
+  bindModelEditorList(slotKey);
+});
 
 function readPositiveNumber(value, fallback) {
   const parsed = Number(value);

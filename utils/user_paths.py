@@ -102,6 +102,10 @@ def get_user_runtime_events_dir() -> Path:
     return get_user_runtime_dir() / "task_events"
 
 
+def get_user_task_history_dir() -> Path:
+    return get_user_runtime_dir() / "task_history"
+
+
 def get_task_file_prefix(task_id: str) -> str:
     """生成 task 相关文件的统一前缀：hash + 最后一级目录名。"""
     task_id = str(task_id or "").strip()
@@ -229,6 +233,9 @@ def ensure_user_app_config_exists() -> Path:
         "runtime": {
             "action_window_steps": 30,
             "thinking_interval": 30,
+            "thinking_enabled": True,
+            "thinking_steps": 30,
+            "no_tool_retry_limit": 7,
             "max_turns": 100000,
             "fresh_enabled": False,
             "fresh_interval_sec": 0,
@@ -239,6 +246,7 @@ def ensure_user_app_config_exists() -> Path:
         },
         "context": {
             "user_history_compress_threshold_tokens": 1500,
+            "user_history_recent_items": 0,
             "structured_call_info_compress_threshold_agents": 10,
             "structured_call_info_compress_threshold_tokens": 2200,
         },
@@ -294,18 +302,45 @@ def get_runtime_settings() -> Dict[str, Any]:
 
     env_action_window = os.environ.get("MLA_ACTION_WINDOW_STEPS", "").strip()
     env_thinking_interval = os.environ.get("MLA_THINKING_INTERVAL", "").strip()
+    env_thinking_steps = os.environ.get("MLA_THINKING_STEPS", "").strip()
+    env_thinking_enabled = os.environ.get("MLA_THINKING_ENABLED", "").strip().lower()
+    env_no_tool_retry_limit = os.environ.get("MLA_NO_TOOL_RETRY_LIMIT", "").strip()
+    env_visible_skills = os.environ.get("MLA_VISIBLE_SKILLS_JSON", "").strip()
     env_max_turns = os.environ.get("MLA_MAX_TURNS", "").strip()
     env_fresh_enabled = os.environ.get("MLA_FRESH_ENABLED", "").strip().lower()
     env_fresh_interval = os.environ.get("MLA_FRESH_INTERVAL_SEC", "").strip()
 
     action_window_steps = int(env_action_window or runtime.get("action_window_steps", 30) or 30)
-    thinking_interval = int(env_thinking_interval or runtime.get("thinking_interval", action_window_steps) or action_window_steps)
+    thinking_steps = int(
+        env_thinking_steps
+        or runtime.get("thinking_steps", runtime.get("thinking_interval", action_window_steps))
+        or action_window_steps
+    )
+    thinking_interval = int(env_thinking_interval or runtime.get("thinking_interval", thinking_steps) or thinking_steps)
+    thinking_enabled = (
+        env_thinking_enabled in {"1", "true", "yes", "on"}
+        if env_thinking_enabled
+        else bool(runtime.get("thinking_enabled", True))
+    )
+    no_tool_retry_limit = int(env_no_tool_retry_limit or runtime.get("no_tool_retry_limit", 7) or 7)
+    visible_skills = runtime.get("visible_skills")
+    if env_visible_skills:
+        try:
+            parsed = json.loads(env_visible_skills)
+            if isinstance(parsed, list):
+                visible_skills = [str(item).strip() for item in parsed if str(item).strip()]
+        except Exception:
+            pass
     max_turns = int(env_max_turns or runtime.get("max_turns", 100000) or 100000)
     fresh_enabled = (env_fresh_enabled in {"1", "true", "yes", "on"}) if env_fresh_enabled else bool(runtime.get("fresh_enabled", False))
     fresh_interval_sec = int(env_fresh_interval or runtime.get("fresh_interval_sec", 0) or 0)
     return {
         "action_window_steps": max(1, action_window_steps),
         "thinking_interval": max(1, thinking_interval),
+        "thinking_steps": max(1, thinking_steps),
+        "thinking_enabled": bool(thinking_enabled),
+        "no_tool_retry_limit": max(1, no_tool_retry_limit),
+        "visible_skills": visible_skills if isinstance(visible_skills, list) else None,
         "max_turns": max(1, max_turns),
         "fresh_enabled": fresh_enabled,
         "fresh_interval_sec": max(0, fresh_interval_sec),
@@ -316,10 +351,15 @@ def get_context_settings() -> Dict[str, Any]:
     """读取上下文构建相关配置。"""
     cfg = load_user_app_config()
     context = cfg.get("context", {}) if isinstance(cfg, dict) else {}
+    env_history_threshold = os.environ.get("MLA_USER_HISTORY_COMPRESS_THRESHOLD_TOKENS", "").strip()
+    env_history_recent_items = os.environ.get("MLA_USER_HISTORY_RECENT_ITEMS", "").strip()
+    env_structured_agent_threshold = os.environ.get("MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_AGENTS", "").strip()
+    env_structured_token_threshold = os.environ.get("MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_TOKENS", "").strip()
     return {
-        "user_history_compress_threshold_tokens": max(0, int(context.get("user_history_compress_threshold_tokens", 1500) or 1500)),
-        "structured_call_info_compress_threshold_agents": max(1, int(context.get("structured_call_info_compress_threshold_agents", 10) or 10)),
-        "structured_call_info_compress_threshold_tokens": max(0, int(context.get("structured_call_info_compress_threshold_tokens", 2200) or 2200)),
+        "user_history_compress_threshold_tokens": max(0, int(env_history_threshold or context.get("user_history_compress_threshold_tokens", 1500) or 1500)),
+        "user_history_recent_items": max(0, int(env_history_recent_items or context.get("user_history_recent_items", 0) or 0)),
+        "structured_call_info_compress_threshold_agents": max(1, int(env_structured_agent_threshold or context.get("structured_call_info_compress_threshold_agents", 10) or 10)),
+        "structured_call_info_compress_threshold_tokens": max(0, int(env_structured_token_threshold or context.get("structured_call_info_compress_threshold_tokens", 2200) or 2200)),
     }
 
 
@@ -370,11 +410,21 @@ def apply_runtime_env_defaults() -> None:
     os.environ["MLA_EXECUTE_COMMAND_MODE"] = get_default_command_mode()
     os.environ["MLA_SEED_BUILTIN_RESOURCES"] = "true" if get_seed_builtin_resources_enabled() else "false"
     runtime = get_runtime_settings()
+    context = get_context_settings()
     os.environ["MLA_ACTION_WINDOW_STEPS"] = str(runtime["action_window_steps"])
     os.environ["MLA_THINKING_INTERVAL"] = str(runtime["thinking_interval"])
+    os.environ["MLA_THINKING_STEPS"] = str(runtime["thinking_steps"])
+    os.environ["MLA_THINKING_ENABLED"] = "true" if runtime["thinking_enabled"] else "false"
+    os.environ["MLA_NO_TOOL_RETRY_LIMIT"] = str(runtime["no_tool_retry_limit"])
+    if runtime.get("visible_skills") is not None:
+        os.environ["MLA_VISIBLE_SKILLS_JSON"] = json.dumps(runtime["visible_skills"], ensure_ascii=False)
     os.environ["MLA_MAX_TURNS"] = str(runtime["max_turns"])
     os.environ["MLA_FRESH_ENABLED"] = "true" if runtime["fresh_enabled"] else "false"
     os.environ["MLA_FRESH_INTERVAL_SEC"] = str(runtime["fresh_interval_sec"])
+    os.environ["MLA_USER_HISTORY_COMPRESS_THRESHOLD_TOKENS"] = str(context["user_history_compress_threshold_tokens"])
+    os.environ["MLA_USER_HISTORY_RECENT_ITEMS"] = str(context["user_history_recent_items"])
+    os.environ["MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_AGENTS"] = str(context["structured_call_info_compress_threshold_agents"])
+    os.environ["MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_TOKENS"] = str(context["structured_call_info_compress_threshold_tokens"])
     mcp = get_mcp_settings()
     if mcp:
         os.environ["MLA_MCP_CONFIG_JSON"] = json.dumps(mcp, ensure_ascii=False)
@@ -396,8 +446,16 @@ def runtime_env_scope(overrides: Optional[Dict[str, Any]] = None) -> Iterator[No
         "MLA_TOOLS_LIBRARY_DIR",
         "MLA_ACTION_WINDOW_STEPS",
         "MLA_THINKING_INTERVAL",
+        "MLA_THINKING_STEPS",
+        "MLA_THINKING_ENABLED",
+        "MLA_NO_TOOL_RETRY_LIMIT",
+        "MLA_MAX_TURNS",
         "MLA_FRESH_ENABLED",
         "MLA_FRESH_INTERVAL_SEC",
+        "MLA_USER_HISTORY_COMPRESS_THRESHOLD_TOKENS",
+        "MLA_USER_HISTORY_RECENT_ITEMS",
+        "MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_AGENTS",
+        "MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_TOKENS",
         "MLA_MCP_CONFIG_JSON",
         "MLA_EXECUTE_COMMAND_MODE",
         "MLA_SEED_BUILTIN_RESOURCES",

@@ -71,11 +71,8 @@ assets/*.mp4
 assets/paper_generation_demo_*.gif
 web_ui/*.mp4
 
-# Docker related (not needed in repo - use remote image)
-Dockerfile
+# Docker related
 docker-compose.yml
-.dockerignore
-docker/
 *.tar.gz
 mla-docker-build.tar.gz
 test_doc/

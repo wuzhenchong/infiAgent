@@ -18,7 +18,7 @@ class ThinkingAgent:
         # 使用简化的LLM客户端
         self.llm_client = SimpleLLMClient()
         runtime = get_runtime_settings()
-        self.window_steps = runtime.get("action_window_steps", 10)
+        self.window_steps = runtime.get("thinking_steps", runtime.get("action_window_steps", 10))
         self.preferred_model = preferred_model
         self.max_tokens = max_tokens
         

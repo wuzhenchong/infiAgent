@@ -20,6 +20,10 @@ from utils.task_runtime import (
     launch_task_process,
     list_known_tasks,
 )
+from utils.task_history_index import (
+    search_task_history_records,
+    sync_task_history_from_context,
+)
 from core.hierarchy_manager import get_hierarchy_manager
 
 
@@ -69,6 +73,7 @@ class AddMessageTool(BaseTool):
             "stack_path": payload.get("stack_path", ""),
             "running": payload.get("running", False),
             "resumed": payload.get("resumed", False),
+            "launched": payload.get("launched", False),
         }
 
 
@@ -184,3 +189,79 @@ class ListTaskIdsTool(BaseTool):
             "error": "",
             "tasks": tasks,
         }
+
+
+class TaskHistorySearchTool(BaseTool):
+    """检索历史任务数据库。"""
+
+    name = "task_history_search"
+
+    def execute(self, task_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        keyword = str(parameters.get("keyword") or "").strip()
+        relevance_query_text = str(parameters.get("relevance_query_text") or "").strip()
+        start_time_from = str(parameters.get("start_time_from") or "").strip()
+        start_time_to = str(parameters.get("start_time_to") or "").strip()
+        start_round = int(parameters.get("start_round") or 0)
+        enable_vector_search = bool(parameters.get("enable_vector_search", False))
+
+        try:
+            if task_id:
+                try:
+                    sync_task_history_from_context(task_id)
+                except Exception:
+                    pass
+            payload = search_task_history_records(
+                task_id=task_id,
+                keyword=keyword,
+                relevance_query_text=relevance_query_text,
+                start_time_from=start_time_from,
+                start_time_to=start_time_to,
+                start_round=start_round,
+                enable_vector_search=enable_vector_search,
+            )
+            results = payload.get("results", [])
+            semantic_error = payload.get("semantic_error") or ""
+            if enable_vector_search and relevance_query_text and semantic_error:
+                return {
+                    "status": "error",
+                    "output": "",
+                    "error": semantic_error,
+                    "results": results,
+                }
+
+            if not results:
+                return {
+                    "status": "success",
+                    "output": "没有检索到匹配的历史任务信息。",
+                    "error": "",
+                    "results": [],
+                }
+
+            lines = []
+            for idx, item in enumerate(results, 1):
+                lines.append(
+                    f"{idx}. 第{item.get('round')}条历史任务 | start={item.get('start_time','')} | completion={item.get('completion_time','')}"
+                )
+                for instruction in item.get("instructions", [])[:3]:
+                    lines.append(f"   instruction: {instruction[:300]}")
+                if item.get("final_output"):
+                    lines.append(f"   final_output: {str(item['final_output'])[:800]}")
+                if item.get("latest_thinking"):
+                    lines.append(f"   latest_thinking: {str(item['latest_thinking'])[:500]}")
+                score = item.get("score")
+                if score is not None:
+                    lines.append(f"   score: {score:.4f}")
+
+            return {
+                "status": "success",
+                "output": "\n".join(lines),
+                "error": "",
+                "results": results,
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "output": "",
+                "error": str(e),
+                "results": [],
+            }
