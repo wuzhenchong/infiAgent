@@ -226,11 +226,11 @@ class SimpleLLMClient:
         self.multimodal = self.config.get("multimodal", False)
         self.compressor_multimodal = self.config.get("compressor_multimodal", False)
         
-        if not self.api_key:
-            raise ValueError("未配置API密钥")
-        
         if not self.models:
             raise ValueError("未配置可用模型列表")
+
+        if not self.api_key:
+            safe_print("⚠️ 未配置全局 API 密钥，将依赖模型级 api_key/base_url 或本地无密钥模型配置。")
         
         # 加载工具配置
         self.tools_config = {}

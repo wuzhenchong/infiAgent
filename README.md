@@ -4,7 +4,7 @@
   <h1>MLA V3 - Build Domain-Specific SOTA-Level AI Agents</h1>
 
   <p>
-    <img src="https://img.shields.io/badge/version-3.1.2-blue.svg" alt="Version">
+    <img src="https://img.shields.io/badge/version-3.2.1-blue.svg" alt="Version">
     <img src="https://img.shields.io/badge/python-3.9+-green.svg" alt="Python">
     <img src="https://img.shields.io/badge/license-GPL-blue.svg" alt="License: GPL">
   </p>
@@ -30,6 +30,10 @@
 ### Update & News🔥
 
 If you pulled the image or code before the latest update date, please refer to the issues that have been fixed and, based on your needs, pull the image and code again.
+
+- [2026/03/31] **Switchable Thinking / ReAct execution mode + task-history database retrieval:** Runtime now supports a switchable cadence model. You can keep the original ThinkingAgent-style “plan first, then execute N steps” workflow, or disable thinking and fall back to an explicit ReAct loop where reflection text is persisted directly inside the message history. Historical task records are also indexed into a local SQLite database, and agents now get a built-in `task_history_search` tool by default. The SDK can expose only the most recent N historical tasks into prompt context, and agents are explicitly instructed to retrieve older task history from the database when recent context is not enough.
+
+- [2026/03/30] **SDK / mac / Web UI model configuration is now much easier for non-experts:** The SDK now accepts structured model profiles directly instead of forcing every integration to hand-write `llm_config.yaml`. The mac desktop app and Docker Web UI both now expose a source-based model editor: you configure the default `base_url` / `api_key` once, then add multiple shared or per-slot models, and each row can either reuse the default source or switch to a custom URL / key. Raw YAML / JSON remain available as advanced fallbacks, but most users no longer need to manually type prefixes or JSON model objects.
 
 - [2026/03/23] **Docker Web UI now supports multi-user registration and account management:** The latest `chenglinhku/mlav3:latest` image runs the SDK-based Web UI directly with the new `webui` startup command on port `4242`. Users can register from the login page, and the bootstrap admin account can manage users inside the Web UI. Please follow the updated Docker command in Quick Start / `docs/DOCKER_GUIDE.md`: mount `~/.mla_v3` to `/root/mla_v3`, publish `4242`, and use `chenglinhku/mlav3:latest webui`. The old standalone config page flow on `9641` is no longer required.
 

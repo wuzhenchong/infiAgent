@@ -437,6 +437,11 @@ class HierarchyManager:
         self._save_stack([])
         
         self._save_context(context)
+        try:
+            from utils.task_history_index import sync_task_history_from_context
+            sync_task_history_from_context(self.task_id, context)
+        except Exception:
+            pass
         safe_print("✅ 任务已归档到history")
     
     def get_current_agent_id(self) -> Optional[str]:

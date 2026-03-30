@@ -73,7 +73,10 @@
                     <div class="config-editor">
                         <div class="config-editor-header">
                             <div class="config-tabs" id="config-tabs">
-                                <button class="config-tab active" data-tab="editor">
+                                <button class="config-tab active" data-tab="guided">
+                                    <i class="fas fa-sliders-h"></i> Beginner
+                                </button>
+                                <button class="config-tab" data-tab="editor">
                                     <i class="fas fa-edit"></i> Editor
                                 </button>
                                 <button class="config-tab" data-tab="tree" id="agent-tree-tab">
@@ -89,7 +92,178 @@
                             </div>
                         </div>
                         <div class="config-editor-content" id="config-editor-content">
-                            <div class="config-tab-content active" id="tab-editor">
+                            <div class="config-tab-content active" id="tab-guided">
+                                <div class="config-guided-scroll">
+                                    <div class="tools-help" style="margin-bottom: 18px;">
+                                        Beginner mode edits <code>llm_config.yaml</code> and <code>app_config.json</code> together.
+                                        Use it for provider selection, model slots, thinking mode, compression and history limits.
+                                        Advanced YAML/JSON edits are still available in the Editor tab.
+                                    </div>
+
+                                    <div class="guided-section-card">
+                                        <h3><i class="fas fa-brain"></i> Model Profiles</h3>
+                                        <div class="form-hint-block" style="margin-bottom:12px;">
+                                            Default <code>base_url</code> / <code>api_key</code> are configured below and reused by any row whose source is set to default.
+                                            Shared Models are materialized into all five model slots when saved.
+                                        </div>
+
+                                        <details class="tool-details" open>
+                                            <summary class="tool-params-toggle">Shared Models (apply to all slots)</summary>
+                                            <div class="model-slot-toolbar">
+                                                <span class="form-hint">Add shared candidates once and they will appear in every slot.</span>
+                                                <button id="add-shared-model-btn" class="btn-secondary" type="button">+ Add Shared Model</button>
+                                            </div>
+                                            <div id="model-shared-list" class="model-slot-list"></div>
+                                        </details>
+
+                                        <details class="tool-details" open>
+                                            <summary class="tool-params-toggle">Main Models</summary>
+                                            <div class="model-slot-toolbar">
+                                                <span class="form-hint">Primary execution models.</span>
+                                                <button id="add-main-model-btn" class="btn-secondary" type="button">+ Add Main Model</button>
+                                            </div>
+                                            <div id="model-main-list" class="model-slot-list"></div>
+                                        </details>
+
+                                        <details class="tool-details">
+                                            <summary class="tool-params-toggle">Read Figure Models</summary>
+                                            <div class="model-slot-toolbar">
+                                                <span class="form-hint">Vision / image understanding models.</span>
+                                                <button id="add-read-model-btn" class="btn-secondary" type="button">+ Add Read Figure Model</button>
+                                            </div>
+                                            <div id="model-read-list" class="model-slot-list"></div>
+                                        </details>
+
+                                        <details class="tool-details">
+                                            <summary class="tool-params-toggle">Figure Generation Models</summary>
+                                            <div class="model-slot-toolbar">
+                                                <span class="form-hint">Image generation models.</span>
+                                                <button id="add-figure-model-btn" class="btn-secondary" type="button">+ Add Figure Model</button>
+                                            </div>
+                                            <div id="model-figure-list" class="model-slot-list"></div>
+                                        </details>
+
+                                        <details class="tool-details">
+                                            <summary class="tool-params-toggle">Compressor Models</summary>
+                                            <div class="model-slot-toolbar">
+                                                <span class="form-hint">Compression and summarization models.</span>
+                                                <button id="add-compressor-model-btn" class="btn-secondary" type="button">+ Add Compressor Model</button>
+                                            </div>
+                                            <div id="model-compressor-list" class="model-slot-list"></div>
+                                        </details>
+
+                                        <details class="tool-details">
+                                            <summary class="tool-params-toggle">Thinking Models</summary>
+                                            <div class="model-slot-toolbar">
+                                                <span class="form-hint">Thinking Agent specific models.</span>
+                                                <button id="add-thinking-model-btn" class="btn-secondary" type="button">+ Add Thinking Model</button>
+                                            </div>
+                                            <div id="model-thinking-list" class="model-slot-list"></div>
+                                        </details>
+
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Shared Base URL</label>
+                                                <input type="text" id="guided-base-url" class="form-input" placeholder="Optional fallback base URL">
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Shared API Key</label>
+                                                <input type="text" id="guided-api-key" class="form-input" placeholder="Optional fallback API key">
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Temperature</label>
+                                                <input type="number" id="guided-temperature" class="form-input" step="0.1" min="0" max="2" placeholder="0">
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Max Tokens</label>
+                                                <input type="number" id="guided-max-tokens" class="form-input" placeholder="0 = auto">
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Max Context Window</label>
+                                                <input type="number" id="guided-max-context" class="form-input" placeholder="500000">
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Timeout (seconds)</label>
+                                                <input type="number" id="guided-timeout" class="form-input" placeholder="600">
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Stream Timeout (seconds)</label>
+                                                <input type="number" id="guided-stream-timeout" class="form-input" placeholder="30">
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label">First Chunk Timeout (seconds)</label>
+                                                <input type="number" id="guided-first-chunk-timeout" class="form-input" placeholder="30">
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label"><input type="checkbox" id="guided-multimodal"> Multimodal</label>
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label"><input type="checkbox" id="guided-compressor-multimodal"> Compressor Multimodal</label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="guided-section-card">
+                                        <h3><i class="fas fa-bolt"></i> Runtime & History</h3>
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label"><input type="checkbox" id="guided-thinking-enabled"> Enable Thinking Agent Mode</label>
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Thinking Steps</label>
+                                                <input type="number" id="guided-thinking-steps" class="form-input" min="1" placeholder="30">
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label">No-tool Retry Limit</label>
+                                                <input type="number" id="guided-no-tool-retry-limit" class="form-input" min="1" placeholder="7">
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Max Turns</label>
+                                                <input type="number" id="guided-max-turns" class="form-input" min="1" placeholder="100000">
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label">User History Compress Threshold</label>
+                                                <input type="number" id="guided-user-history-threshold" class="form-input" min="0" placeholder="1500">
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Recent History Items</label>
+                                                <input type="number" id="guided-user-history-recent-items" class="form-input" min="0" placeholder="0 = all history">
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Structured Call Agent Threshold</label>
+                                                <input type="number" id="guided-structured-call-agent-threshold" class="form-input" min="1" placeholder="10">
+                                            </div>
+                                            <div class="form-group form-half">
+                                                <label class="form-label">Structured Call Token Threshold</label>
+                                                <input type="number" id="guided-structured-call-token-threshold" class="form-input" min="0" placeholder="2200">
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Visible Skills <span class="form-hint">(one per line)</span></label>
+                                            <textarea id="guided-visible-skills" class="form-input" rows="4" placeholder="browser-use&#10;paper-analyze"></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-tab-content" id="tab-editor">
                                 <textarea id="config-editor-textarea" placeholder="Loading configuration..."></textarea>
                             </div>
                             <div class="config-tab-content" id="tab-tree">

@@ -148,6 +148,47 @@ def get_run_env_config_dir(username: str) -> Path:
     return cfg
 
 
+def get_config_dir_for_type(username: str, config_type: str, agent_system: str) -> Path:
+    if config_type == 'run_env':
+        return get_run_env_config_dir(username)
+    if config_type == 'agent':
+        return get_agent_system_dir(username, agent_system)
+    raise ValueError("Invalid config type. Use 'run_env' or 'agent'")
+
+
+def validate_config_filename(filename: str, config_type: str) -> None:
+    if not filename:
+        raise ValueError("Missing file parameter")
+    if '..' in filename or '/' in filename or '\\' in filename:
+        raise ValueError("Invalid file name")
+    if filename.endswith('.yaml'):
+        return
+    if config_type == 'run_env' and filename == 'app_config.json':
+        return
+    raise ValueError("Invalid file name")
+
+
+def ensure_config_path(config_dir: Path, filename: str) -> Path:
+    config_path = config_dir / filename
+    try:
+        config_path.relative_to(config_dir.resolve())
+    except ValueError as exc:
+        raise ValueError("Invalid file path") from exc
+    return config_path
+
+
+def parse_config_text(filename: str, content: str):
+    if filename.endswith('.yaml'):
+        return yaml.safe_load(content) or {}
+    return json.loads(content or "{}")
+
+
+def dump_config_text(filename: str, payload) -> str:
+    if filename.endswith('.yaml'):
+        return yaml.safe_dump(payload or {}, allow_unicode=True, sort_keys=False)
+    return json.dumps(payload or {}, ensure_ascii=False, indent=2) + "\n"
+
+
 def sanitize_tool_name(raw_name: str) -> str:
     import re
     name = re.sub(r'[^a-zA-Z0-9_.-]+', '_', (raw_name or '').strip())
@@ -2740,21 +2781,29 @@ def list_config_files():
         
         agent_system = request.args.get('agent_system', 'Researcher')
         
-        if config_type == 'run_env':
-            config_dir = get_run_env_config_dir(username)
-        elif config_type == 'agent':
-            config_dir = get_agent_system_dir(username, agent_system)
-        else:
-            return jsonify({"error": "Invalid config type. Use 'run_env' or 'agent'"}), 400
+        try:
+            config_dir = get_config_dir_for_type(username, config_type, agent_system)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         
         config_dir.mkdir(parents=True, exist_ok=True)
         if not config_dir.exists():
             return jsonify({"error": f"Config directory not found: {agent_system}"}), 404
         
-        # List all YAML files in config directory
         config_files = []
-        for file_path in config_dir.glob("*.yaml"):
-            if file_path.is_file():
+        patterns = ["*.yaml"]
+        if config_type == 'run_env':
+            patterns.append("app_config.json")
+
+        seen = set()
+        for pattern in patterns:
+            iterator = config_dir.glob(pattern)
+            for file_path in iterator:
+                if not file_path.is_file():
+                    continue
+                if file_path.name in seen:
+                    continue
+                seen.add(file_path.name)
                 config_files.append({
                     "name": file_path.name,
                     "path": str(file_path)
@@ -2783,33 +2832,17 @@ def read_config_file():
         config_type = request.args.get('type', 'run_env')
         agent_system = request.args.get('agent_system', 'Researcher')
         
-        if not filename:
-            return jsonify({"error": "Missing file parameter"}), 400
-        
-        # Security: only allow YAML files in config directory
-        if not filename.endswith('.yaml') or '..' in filename or '/' in filename or '\\' in filename:
-            return jsonify({"error": "Invalid file name"}), 400
-        
-        # Determine config directory based on type
-        if config_type == 'run_env':
-            config_dir = get_run_env_config_dir(username)
-        elif config_type == 'agent':
-            config_dir = get_agent_system_dir(username, agent_system)
-        else:
-            return jsonify({"error": "Invalid config type"}), 400
+        try:
+            validate_config_filename(filename, config_type)
+            config_dir = get_config_dir_for_type(username, config_type, agent_system)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         
         config_dir.mkdir(parents=True, exist_ok=True)
-        config_path = config_dir / filename
-        
-        # Security: ensure file is within config directory
-        # For symlinks, check the symlink path itself (not the resolved target)
-        # This allows symlinks that point outside the config dir (e.g., /mla_config)
         try:
-            # Check if the path itself (not resolved) is within config directory
-            # Use resolve() only on config_dir to get absolute path, not on config_path
-            config_path.relative_to(config_dir.resolve())
-        except ValueError:
-            return jsonify({"error": "Invalid file path"}), 400
+            config_path = ensure_config_path(config_dir, filename)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         
         if not config_path.exists():
             return jsonify({"error": "File not found"}), 404
@@ -2983,39 +3016,24 @@ def save_config_file():
         config_type = data.get('type', 'run_env')
         agent_system = data.get('agent_system', 'Researcher')
         
-        if not filename:
-            return jsonify({"error": "Missing file parameter"}), 400
-        
-        # Security: only allow YAML files in config directory
-        if not filename.endswith('.yaml') or '..' in filename or '/' in filename or '\\' in filename:
-            return jsonify({"error": "Invalid file name"}), 400
-        
-        # Determine config directory based on type
-        if config_type == 'run_env':
-            config_dir = get_run_env_config_dir(username)
-        elif config_type == 'agent':
-            config_dir = get_agent_system_dir(username, agent_system)
-        else:
-            return jsonify({"error": "Invalid config type"}), 400
+        try:
+            validate_config_filename(filename, config_type)
+            config_dir = get_config_dir_for_type(username, config_type, agent_system)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         
         config_dir.mkdir(parents=True, exist_ok=True)
-        config_path = config_dir / filename
-        
-        # Security: ensure file is within config directory
-        # For symlinks, check the symlink path itself (not the resolved target)
-        # This allows symlinks that point outside the config dir (e.g., /mla_config)
         try:
-            # Check if the path itself (not resolved) is within config directory
-            # Use resolve() only on config_dir to get absolute path, not on config_path
-            config_path.relative_to(config_dir.resolve())
-        except ValueError:
-            return jsonify({"error": "Invalid file path"}), 400
-        
-        # Validate YAML syntax before saving
+            config_path = ensure_config_path(config_dir, filename)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
         try:
-            yaml.safe_load(content)
+            parse_config_text(filename, content)
         except yaml.YAMLError as e:
             return jsonify({"error": f"Invalid YAML syntax: {str(e)}"}), 400
+        except json.JSONDecodeError as e:
+            return jsonify({"error": f"Invalid JSON syntax: {str(e)}"}), 400
         
         # Save file
         try:
@@ -3027,6 +3045,67 @@ def save_config_file():
     except Exception as e:
         import traceback
         print(f"Save config file error: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/config/guided', methods=['GET'])
+@login_required
+def get_guided_config():
+    try:
+        username = session.get('username')
+        if not username:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        ensure_user_runtime_ready(username)
+        llm_path = get_web_user_llm_config_path(username)
+        app_path = get_web_user_app_config_path(username)
+
+        llm_payload = yaml.safe_load(llm_path.read_text(encoding='utf-8')) or {}
+        app_payload = json.loads(app_path.read_text(encoding='utf-8') or "{}")
+
+        return jsonify({
+            "llm_config": llm_payload,
+            "app_config": app_payload,
+            "llm_filename": llm_path.name,
+            "app_filename": app_path.name,
+        })
+    except Exception as e:
+        import traceback
+        print(f"Get guided config error: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/config/guided', methods=['POST'])
+@login_required
+def save_guided_config():
+    try:
+        username = session.get('username')
+        if not username:
+            return jsonify({"error": "User not authenticated"}), 401
+
+        ensure_user_runtime_ready(username)
+        payload = request.json or {}
+        llm_config = payload.get('llm_config')
+        app_config = payload.get('app_config')
+
+        if not isinstance(llm_config, dict):
+            return jsonify({"error": "llm_config must be an object"}), 400
+        if not isinstance(app_config, dict):
+            return jsonify({"error": "app_config must be an object"}), 400
+
+        llm_text = dump_config_text('llm_config.yaml', llm_config)
+        app_text = dump_config_text('app_config.json', app_config)
+
+        get_web_user_llm_config_path(username).write_text(llm_text, encoding='utf-8')
+        get_web_user_app_config_path(username).write_text(app_text, encoding='utf-8')
+
+        return jsonify({
+            "success": True,
+            "message": "Guided configuration saved successfully",
+        })
+    except Exception as e:
+        import traceback
+        print(f"Save guided config error: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 

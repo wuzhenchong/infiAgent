@@ -156,6 +156,10 @@ def ensure_web_user_runtime(username: str) -> Path:
             "runtime": {
                 "action_window_steps": 30,
                 "thinking_interval": 30,
+                "thinking_enabled": True,
+                "thinking_steps": 30,
+                "no_tool_retry_limit": 7,
+                "visible_skills": [],
                 "max_turns": 100000,
                 "fresh_enabled": False,
                 "fresh_interval_sec": 0,
@@ -166,6 +170,7 @@ def ensure_web_user_runtime(username: str) -> Path:
             },
             "context": {
                 "user_history_compress_threshold_tokens": 1500,
+                "user_history_recent_items": 0,
                 "structured_call_info_compress_threshold_agents": 10,
                 "structured_call_info_compress_threshold_tokens": 2200,
             },

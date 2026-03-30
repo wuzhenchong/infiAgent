@@ -6,7 +6,7 @@
   <h1>MLA V3 - 打造专属领域的 SOTA 级智能体</h1>
 
   <p>
-    <img src="https://img.shields.io/badge/version-3.1.2-blue.svg" alt="Version">
+    <img src="https://img.shields.io/badge/version-3.2.1-blue.svg" alt="Version">
     <img src="https://img.shields.io/badge/python-3.9+-green.svg" alt="Python">
     <img src="https://img.shields.io/badge/license-GPL-blue.svg" alt="License: GPL">
   </p>
@@ -32,6 +32,11 @@
 ### 更新 & 新闻🔥
 
 如果你在最新更新日期前拉取镜像或者代码，请参考修复的问题，重新拉取镜像和代码。
+
+- [2026/03/31] **Thinking / ReAct 模式可切换，并引入历史任务数据库检索：** 运行时现在支持两种节奏。你既可以保留原来的 ThinkingAgent 式“先思考，再执行 N 步”的长程模式，也可以关闭 thinking，切换到显式 ReAct 模式，让反思文本直接进入消息历史。与此同时，历史任务会被索引进本地 SQLite 数据库，所有 agent 默认都会挂载 `task_history_search` 工具。SDK 还支持只把最近 N 条历史任务注入 prompt；如果这些最近历史不足以完成当前任务，agent 会被明确提示去历史任务数据库里检索旧任务。
+
+- [2026/03/30] **SDK / mac / Web UI 模型配置对小白更友好：** SDK 现在支持直接传结构化模型配置，不再要求每个集成都手写 `llm_config.yaml`。mac 客户端和 Docker Web UI 现在都提供了基于 source 的模型编辑器：先配置默认 `base_url` / `api_key`，再按共享模型或各功能分区添加多个模型条目；每个条目都可以继续复用默认 source，也可以切到自定义 URL / Key。Raw YAML / JSON 仍然保留给高级用户，但普通用户已经不需要再手动写前缀或 JSON 模型对象。
+
 - [2026/03/23] **Docker Web UI 现已支持多用户注册与用户管理：** 最新 `chenglinhku/mlav3:latest` 镜像会通过新的 `webui` 启动命令直接运行基于 SDK 的 Web UI，默认使用 `4242` 端口。用户可以在登录页自行注册，初始管理员账号可在 Web UI 内管理用户。请按 Quick Start 和 `docs/DOCKER_GUIDE.md` 中更新后的 Docker 命令启动：挂载 `~/.mla_v3` 到 `/root/mla_v3`，映射 `4242`，并使用 `chenglinhku/mlav3:latest webui`。旧版基于 `9641` 的独立配置页面流程已不再需要。
 
 - [2026/03/19] **基于 `infiagent` SDK 推出 CheapClaw：** CheapClaw 现在作为基于 SDK 的应用层发布，在保留 OpenCowork 大部分实用能力的基础上，支持自定义 bot、多 bot 协作、对接各种 IM 软件以及 Skills，同时完整继承 `infiagent` 的能力模型：单个 bot 背后可挂多智能体系统、支持低成本长程任务，并在单个 bot 内实现按 task 隔离上下文。同一个 bot 下，不同 task 的历史上下文彼此隔离，而同一个 task 会持续复用同一份长程上下文，而不是共享单一 bot session。[点击这里查看 CheapClaw](https://github.com/polyuiislab/CheapClaw)。

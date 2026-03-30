@@ -141,6 +141,8 @@ def _build_launch_config_from_env_overrides(env_overrides: Optional[Dict[str, An
     int_mapping = {
         "MLA_ACTION_WINDOW_STEPS": "action_window_steps",
         "MLA_THINKING_INTERVAL": "thinking_interval",
+        "MLA_THINKING_STEPS": "thinking_steps",
+        "MLA_NO_TOOL_RETRY_LIMIT": "no_tool_retry_limit",
         "MLA_MAX_TURNS": "max_turns",
         "MLA_FRESH_INTERVAL_SEC": "fresh_interval_sec",
     }
@@ -156,6 +158,10 @@ def _build_launch_config_from_env_overrides(env_overrides: Optional[Dict[str, An
     fresh_enabled = _parse_env_flag(overrides.get("MLA_FRESH_ENABLED"))
     if fresh_enabled is not None:
         config["fresh_enabled"] = fresh_enabled
+
+    thinking_enabled = _parse_env_flag(overrides.get("MLA_THINKING_ENABLED"))
+    if thinking_enabled is not None:
+        config["thinking_enabled"] = thinking_enabled
 
     seed_builtin = _parse_env_flag(overrides.get("MLA_SEED_BUILTIN_RESOURCES"))
     if seed_builtin is not None:
@@ -180,6 +186,21 @@ def _build_launch_config_from_env_overrides(env_overrides: Optional[Dict[str, An
             parsed = json.loads(mcp_config)
             if isinstance(parsed, dict) and isinstance(parsed.get("servers"), list):
                 config["mcp_servers"] = parsed["servers"]
+        except Exception:
+            pass
+
+    context_int_mapping = {
+        "MLA_USER_HISTORY_COMPRESS_THRESHOLD_TOKENS": "user_history_compress_threshold_tokens",
+        "MLA_USER_HISTORY_RECENT_ITEMS": "user_history_recent_items",
+        "MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_AGENTS": "structured_call_info_compress_threshold_agents",
+        "MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_TOKENS": "structured_call_info_compress_threshold_tokens",
+    }
+    for env_key, config_key in context_int_mapping.items():
+        value = overrides.get(env_key)
+        if value is None or value == "":
+            continue
+        try:
+            config[config_key] = int(value)
         except Exception:
             pass
 
@@ -550,6 +571,12 @@ def launch_task_process(
             env["MLA_ACTION_WINDOW_STEPS"] = str(max(1, int(config["action_window_steps"])))
         if config.get("thinking_interval") is not None:
             env["MLA_THINKING_INTERVAL"] = str(max(1, int(config["thinking_interval"])))
+        if config.get("thinking_steps") is not None:
+            env["MLA_THINKING_STEPS"] = str(max(1, int(config["thinking_steps"])))
+        if config.get("thinking_enabled") is not None:
+            env["MLA_THINKING_ENABLED"] = "true" if bool(config["thinking_enabled"]) else "false"
+        if config.get("no_tool_retry_limit") is not None:
+            env["MLA_NO_TOOL_RETRY_LIMIT"] = str(max(1, int(config["no_tool_retry_limit"])))
         if config.get("max_turns") is not None:
             env["MLA_MAX_TURNS"] = str(max(1, int(config["max_turns"])))
         if config.get("fresh_enabled") is not None:
@@ -564,6 +591,14 @@ def launch_task_process(
             env["MLA_CONTEXT_HOOKS_JSON"] = json.dumps(config["context_hooks"], ensure_ascii=False)
         if config.get("visible_skills") is not None:
             env["MLA_VISIBLE_SKILLS_JSON"] = json.dumps(config["visible_skills"], ensure_ascii=False)
+        if config.get("user_history_compress_threshold_tokens") is not None:
+            env["MLA_USER_HISTORY_COMPRESS_THRESHOLD_TOKENS"] = str(max(0, int(config["user_history_compress_threshold_tokens"])))
+        if config.get("user_history_recent_items") is not None:
+            env["MLA_USER_HISTORY_RECENT_ITEMS"] = str(max(0, int(config["user_history_recent_items"])))
+        if config.get("structured_call_info_compress_threshold_agents") is not None:
+            env["MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_AGENTS"] = str(max(1, int(config["structured_call_info_compress_threshold_agents"])))
+        if config.get("structured_call_info_compress_threshold_tokens") is not None:
+            env["MLA_STRUCTURED_CALL_INFO_COMPRESS_THRESHOLD_TOKENS"] = str(max(0, int(config["structured_call_info_compress_threshold_tokens"])))
         if config.get("seed_builtin_resources") is not None:
             env["MLA_SEED_BUILTIN_RESOURCES"] = "true" if bool(config["seed_builtin_resources"]) else "false"
 

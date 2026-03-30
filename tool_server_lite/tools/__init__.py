@@ -51,7 +51,7 @@ from .reference_tools import (
 from .powerpoint_tools import ImagesToPptTool
 
 from .skill_tools import LoadSkillTool, OffloadSkillTool, FreshTool
-from .task_tools import AddMessageTool, StartBackgroundTaskTool, TaskShareContextPathTool, ListTaskIdsTool
+from .task_tools import AddMessageTool, StartBackgroundTaskTool, TaskShareContextPathTool, ListTaskIdsTool, TaskHistorySearchTool
 
 from .browser_tools import (
     BrowserLaunchTool,
@@ -128,4 +128,5 @@ __all__ = [
     "StartBackgroundTaskTool",
     "TaskShareContextPathTool",
     "ListTaskIdsTool",
+    "TaskHistorySearchTool",
 ]

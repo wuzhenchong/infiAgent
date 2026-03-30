@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hashlib
+from copy import deepcopy
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -26,6 +28,7 @@ from core.hierarchy_manager import get_hierarchy_manager
 from core.runtime_exceptions import InfiAgentRunError
 from core.state_cleaner import clean_before_start
 from utils.config_loader import ConfigLoader
+from utils.llm_config_builder import build_llm_config_from_profiles
 from utils.runtime_control import is_task_running, request_fresh
 from utils.task_runtime import (
     append_task_message,
@@ -44,6 +47,7 @@ from utils.user_paths import (
     get_user_logs_dir,
     get_user_runtime_dir,
     get_task_file_prefix,
+    get_user_data_root,
     get_user_skills_library_root,
     get_user_tools_library_root,
     runtime_env_scope,
@@ -66,12 +70,29 @@ def _as_root_dir(path: Optional[str], expected_leaf: Optional[str] = None) -> Op
     return normalized
 
 
+def _materialize_inline_llm_config(
+    *,
+    user_data_root: Optional[str],
+    llm_config: Dict[str, Any],
+) -> str:
+    root = Path(user_data_root).expanduser().resolve() if user_data_root else get_user_data_root()
+    cfg_root = root / "runtime" / "sdk_llm_configs"
+    cfg_root.mkdir(parents=True, exist_ok=True)
+    raw = yaml.safe_dump(llm_config or {}, allow_unicode=True, sort_keys=False)
+    digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
+    path = cfg_root / f"llm_config_{digest}.yaml"
+    path.write_text(raw, encoding="utf-8")
+    return str(path)
+
+
 class InfiAgent:
     def __init__(
         self,
         workspace: Optional[str] = None,
         user_data_root: Optional[str] = None,
         llm_config_path: Optional[str] = None,
+        llm_config: Optional[Dict[str, Any]] = None,
+        model_profiles: Optional[Dict[str, Any]] = None,
         library_dir: Optional[str] = None,
         agent_library_dir: Optional[str] = None,
         skills_dir: Optional[str] = None,
@@ -80,15 +101,24 @@ class InfiAgent:
         default_agent_name: Optional[str] = None,
         action_window_steps: Optional[int] = None,
         thinking_interval: Optional[int] = None,
+        thinking_enabled: Optional[bool] = None,
+        thinking_steps: Optional[int] = None,
+        no_tool_retry_limit: Optional[int] = None,
+        user_history_compress_threshold_tokens: Optional[int] = None,
+        user_history_recent_items: Optional[int] = None,
         max_turns: Optional[int] = None,
         fresh_enabled: Optional[bool] = None,
         fresh_interval_sec: Optional[int] = None,
         mcp_servers: Optional[List[Dict[str, Any]]] = None,
         tool_hooks: Optional[List[Dict[str, Any]]] = None,
         context_hooks: Optional[List[Dict[str, Any]]] = None,
+        visible_skills: Optional[List[str]] = None,
         seed_builtin_resources: bool = True,
         direct_tools: bool = True,
     ):
+        if llm_config_path and (llm_config is not None or model_profiles is not None):
+            raise ValueError("llm_config_path 与 llm_config/model_profiles 只能二选一")
+
         self.default_agent_system = str(default_agent_system or "OpenCowork").strip() or "OpenCowork"
         self.default_agent_name = str(default_agent_name or "alpha_agent").strip() or "alpha_agent"
         self.direct_tools = bool(direct_tools)
@@ -98,12 +128,23 @@ class InfiAgent:
 
         explicit_agent_library_root = _as_root_dir(agent_library_dir or library_dir, "agent_library")
         resolved_user_data_root = _normalize_path(user_data_root) or explicit_agent_library_root
+        inline_llm_config = None
+        if model_profiles is not None:
+            inline_llm_config = build_llm_config_from_profiles(model_profiles)
+        elif llm_config is not None:
+            inline_llm_config = dict(llm_config)
+        resolved_llm_config_path = _normalize_path(llm_config_path)
+        if inline_llm_config is not None:
+            resolved_llm_config_path = _materialize_inline_llm_config(
+                user_data_root=resolved_user_data_root,
+                llm_config=inline_llm_config,
+            )
 
         self.runtime_env_overrides: Dict[str, Any] = {}
         if resolved_user_data_root:
             self.runtime_env_overrides["MLA_USER_DATA_ROOT"] = resolved_user_data_root
-        if llm_config_path:
-            self.runtime_env_overrides["MLA_LLM_CONFIG_PATH"] = _normalize_path(llm_config_path)
+        if resolved_llm_config_path:
+            self.runtime_env_overrides["MLA_LLM_CONFIG_PATH"] = resolved_llm_config_path
         if explicit_agent_library_root:
             self.runtime_env_overrides["MLA_AGENT_LIBRARY_DIR"] = explicit_agent_library_root
         if skills_dir:
@@ -114,6 +155,16 @@ class InfiAgent:
             self.runtime_env_overrides["MLA_ACTION_WINDOW_STEPS"] = str(max(1, int(action_window_steps)))
         if thinking_interval is not None:
             self.runtime_env_overrides["MLA_THINKING_INTERVAL"] = str(max(1, int(thinking_interval)))
+        if thinking_enabled is not None:
+            self.runtime_env_overrides["MLA_THINKING_ENABLED"] = "true" if thinking_enabled else "false"
+        if thinking_steps is not None:
+            self.runtime_env_overrides["MLA_THINKING_STEPS"] = str(max(1, int(thinking_steps)))
+        if no_tool_retry_limit is not None:
+            self.runtime_env_overrides["MLA_NO_TOOL_RETRY_LIMIT"] = str(max(1, int(no_tool_retry_limit)))
+        if user_history_compress_threshold_tokens is not None:
+            self.runtime_env_overrides["MLA_USER_HISTORY_COMPRESS_THRESHOLD_TOKENS"] = str(max(0, int(user_history_compress_threshold_tokens)))
+        if user_history_recent_items is not None:
+            self.runtime_env_overrides["MLA_USER_HISTORY_RECENT_ITEMS"] = str(max(0, int(user_history_recent_items)))
         if max_turns is not None:
             self.runtime_env_overrides["MLA_MAX_TURNS"] = str(max(1, int(max_turns)))
         if fresh_enabled is not None:
@@ -126,21 +177,31 @@ class InfiAgent:
             self.runtime_env_overrides["MLA_TOOL_HOOKS_JSON"] = json.dumps(tool_hooks, ensure_ascii=False)
         if context_hooks is not None:
             self.runtime_env_overrides["MLA_CONTEXT_HOOKS_JSON"] = json.dumps(context_hooks, ensure_ascii=False)
+        if visible_skills is not None:
+            self.runtime_env_overrides["MLA_VISIBLE_SKILLS_JSON"] = json.dumps(visible_skills, ensure_ascii=False)
         self.runtime_env_overrides["MLA_SEED_BUILTIN_RESOURCES"] = "true" if seed_builtin_resources else "false"
 
         self.user_data_root = resolved_user_data_root
-        self.llm_config_path = _normalize_path(llm_config_path)
+        self.llm_config_path = resolved_llm_config_path
+        self.inline_llm_config = inline_llm_config
+        self.model_profiles = deepcopy(model_profiles) if model_profiles is not None else None
         self.agent_library_root = explicit_agent_library_root
         self.skills_dir = _normalize_path(skills_dir)
         self.tools_dir = _normalize_path(tools_dir)
         self.action_window_steps = max(1, int(action_window_steps)) if action_window_steps is not None else None
         self.thinking_interval = max(1, int(thinking_interval)) if thinking_interval is not None else None
+        self.thinking_enabled = bool(thinking_enabled) if thinking_enabled is not None else None
+        self.thinking_steps = max(1, int(thinking_steps)) if thinking_steps is not None else None
+        self.no_tool_retry_limit = max(1, int(no_tool_retry_limit)) if no_tool_retry_limit is not None else None
+        self.user_history_compress_threshold_tokens = max(0, int(user_history_compress_threshold_tokens)) if user_history_compress_threshold_tokens is not None else None
+        self.user_history_recent_items = max(0, int(user_history_recent_items)) if user_history_recent_items is not None else None
         self.max_turns = max(1, int(max_turns)) if max_turns is not None else None
         self.fresh_enabled = fresh_enabled if fresh_enabled is not None else None
         self.fresh_interval_sec = max(0, int(fresh_interval_sec)) if fresh_interval_sec is not None else None
         self.mcp_servers = mcp_servers
         self.tool_hooks = tool_hooks
         self.context_hooks = context_hooks
+        self.visible_skills = [str(item).strip() for item in visible_skills if str(item).strip()] if visible_skills is not None else None
         self.seed_builtin_resources = bool(seed_builtin_resources)
 
     def _runtime_scope(self, extra_overrides: Optional[Dict[str, Any]] = None):
@@ -179,6 +240,16 @@ class InfiAgent:
             config["action_window_steps"] = self.action_window_steps
         if self.thinking_interval is not None:
             config["thinking_interval"] = self.thinking_interval
+        if self.thinking_enabled is not None:
+            config["thinking_enabled"] = self.thinking_enabled
+        if self.thinking_steps is not None:
+            config["thinking_steps"] = self.thinking_steps
+        if self.no_tool_retry_limit is not None:
+            config["no_tool_retry_limit"] = self.no_tool_retry_limit
+        if self.user_history_compress_threshold_tokens is not None:
+            config["user_history_compress_threshold_tokens"] = self.user_history_compress_threshold_tokens
+        if self.user_history_recent_items is not None:
+            config["user_history_recent_items"] = self.user_history_recent_items
         if self.max_turns is not None:
             config["max_turns"] = self.max_turns
         if self.fresh_enabled is not None:
@@ -191,6 +262,8 @@ class InfiAgent:
             config["tool_hooks"] = self.tool_hooks
         if self.context_hooks is not None:
             config["context_hooks"] = self.context_hooks
+        if self.visible_skills is not None:
+            config["visible_skills"] = self.visible_skills
         config["seed_builtin_resources"] = self.seed_builtin_resources
         return config
 
@@ -240,6 +313,12 @@ class InfiAgent:
         include_trace: bool = False,
         raise_on_error: bool = False,
         stream_llm_tokens: bool = False,
+        thinking_enabled: Optional[bool] = None,
+        thinking_steps: Optional[int] = None,
+        no_tool_retry_limit: Optional[int] = None,
+        visible_skills: Optional[List[str]] = None,
+        user_history_compress_threshold_tokens: Optional[int] = None,
+        user_history_recent_items: Optional[int] = None,
         max_turns: Optional[int] = None,
     ) -> Dict[str, Any]:
         target_task_id = self._resolve_task_id(task_id=task_id, workspace=workspace)
@@ -247,6 +326,25 @@ class InfiAgent:
         target_agent_name = agent_name or self.default_agent_name
 
         extra_runtime_overrides: Dict[str, Any] = {}
+        if thinking_enabled is not None:
+            extra_runtime_overrides["MLA_THINKING_ENABLED"] = "true" if thinking_enabled else "false"
+        if thinking_steps is not None:
+            extra_runtime_overrides["MLA_THINKING_STEPS"] = str(max(1, int(thinking_steps)))
+        if no_tool_retry_limit is not None:
+            extra_runtime_overrides["MLA_NO_TOOL_RETRY_LIMIT"] = str(max(1, int(no_tool_retry_limit)))
+        if visible_skills is not None:
+            extra_runtime_overrides["MLA_VISIBLE_SKILLS_JSON"] = json.dumps(
+                [str(item).strip() for item in visible_skills if str(item).strip()],
+                ensure_ascii=False,
+            )
+        if user_history_compress_threshold_tokens is not None:
+            extra_runtime_overrides["MLA_USER_HISTORY_COMPRESS_THRESHOLD_TOKENS"] = str(
+                max(0, int(user_history_compress_threshold_tokens))
+            )
+        if user_history_recent_items is not None:
+            extra_runtime_overrides["MLA_USER_HISTORY_RECENT_ITEMS"] = str(
+                max(0, int(user_history_recent_items))
+            )
         if max_turns is not None:
             extra_runtime_overrides["MLA_MAX_TURNS"] = str(max(1, int(max_turns)))
 
@@ -644,6 +742,12 @@ class InfiAgent:
         include_trace: bool = False,
         raise_on_error: bool = False,
         stream_llm_tokens: bool = False,
+        thinking_enabled: Optional[bool] = None,
+        thinking_steps: Optional[int] = None,
+        no_tool_retry_limit: Optional[int] = None,
+        visible_skills: Optional[List[str]] = None,
+        user_history_compress_threshold_tokens: Optional[int] = None,
+        user_history_recent_items: Optional[int] = None,
         max_turns: Optional[int] = None,
     ) -> Dict[str, Any]:
         fn = partial(
@@ -659,6 +763,12 @@ class InfiAgent:
             include_trace=include_trace,
             raise_on_error=raise_on_error,
             stream_llm_tokens=stream_llm_tokens,
+            thinking_enabled=thinking_enabled,
+            thinking_steps=thinking_steps,
+            no_tool_retry_limit=no_tool_retry_limit,
+            visible_skills=visible_skills,
+            user_history_compress_threshold_tokens=user_history_compress_threshold_tokens,
+            user_history_recent_items=user_history_recent_items,
             max_turns=max_turns,
         )
         return await asyncio.to_thread(fn)
