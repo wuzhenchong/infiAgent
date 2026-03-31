@@ -3080,16 +3080,494 @@ function clearToolConfirmationState() {
 // Configuration Modal Functions
 let currentConfigFile = 'llm_config.yaml';
 let currentConfigType = 'run_env'; // 'run_env' or 'agent'
+let lastLoadedGuidedLlmConfig = {};
+let lastLoadedGuidedAppConfig = {};
+
+const MODEL_EDITOR_SLOT_CONFIG_KEYS = {
+    shared: null,
+    main: 'models',
+    read: 'read_figure_models',
+    figure: 'figure_models',
+    compressor: 'compressor_models',
+    thinking: 'thinking_models'
+};
+
+const MODEL_EDITOR_PROVIDER_OPTIONS = `
+    <option value="openrouter">OpenRouter</option>
+    <option value="openai_compatible">OpenAI-compatible API</option>
+    <option value="openai_official">OpenAI Official</option>
+    <option value="google_official">Google Official</option>
+    <option value="anthropic_official">Anthropic Official</option>
+    <option value="local_openai_compatible">Local / Keyless OpenAI-compatible</option>
+`;
+
+let modelEditorEntryCounter = 0;
+let modelEditorState = createEmptyModelEditorState();
+
+function getActiveConfigTabName() {
+    return document.querySelector('.config-tab.active')?.dataset?.tab || 'guided';
+}
+
+function readPositiveNumber(value, fallback) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readNonNegativeNumber(value, fallback) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function createEmptyModelEditorState() {
+    return {
+        shared: [],
+        main: [],
+        read: [],
+        figure: [],
+        compressor: [],
+        thinking: []
+    };
+}
+
+function nextModelEditorId() {
+    modelEditorEntryCounter += 1;
+    return `guided-model-entry-${modelEditorEntryCounter}`;
+}
+
+function inferModelProviderKind(modelName, entryBaseUrl, globalBaseUrl, hasApiKey) {
+    const name = String(modelName || '').trim();
+    const effectiveBaseUrl = String(entryBaseUrl || globalBaseUrl || '').trim().toLowerCase();
+    if (name.startsWith('openrouter/')) return 'openrouter';
+    if (effectiveBaseUrl.includes('openrouter.ai')) return 'openrouter';
+    if (name.startsWith('google/')) return 'google_official';
+    if (name.startsWith('anthropic/')) return 'anthropic_official';
+    if (name.startsWith('openai/')) {
+        if (entryBaseUrl) return hasApiKey ? 'openai_compatible' : 'local_openai_compatible';
+        return 'openai_official';
+    }
+    if (entryBaseUrl) return hasApiKey ? 'openai_compatible' : 'local_openai_compatible';
+    return 'openai_official';
+}
+
+function stripModelNameForProvider(providerKind, modelName, entryBaseUrl, globalBaseUrl) {
+    let name = String(modelName || '').trim();
+    const effectiveBaseUrl = String(entryBaseUrl || globalBaseUrl || '').trim().toLowerCase();
+    if (!name) return '';
+    if (providerKind === 'openrouter') {
+        if (name.startsWith('openrouter/')) return name.slice('openrouter/'.length);
+        if (effectiveBaseUrl.includes('openrouter.ai') && name.startsWith('openai/') && name.slice('openai/'.length).includes('/')) {
+            return name.slice('openai/'.length);
+        }
+        return name;
+    }
+    if (providerKind === 'google_official' && name.startsWith('google/')) return name.slice('google/'.length);
+    if (providerKind === 'anthropic_official' && name.startsWith('anthropic/')) return name.slice('anthropic/'.length);
+    if (name.startsWith('openai/')) return name.slice('openai/'.length);
+    return name;
+}
+
+function normalizeModelNameForProvider(providerKind, modelName) {
+    const raw = String(modelName || '').trim();
+    if (!raw) return '';
+    if (providerKind === 'openrouter') {
+        return raw.startsWith('openrouter/') ? raw : `openrouter/${raw}`;
+    }
+    const expectedPrefix = {
+        openai_compatible: 'openai/',
+        openai_official: 'openai/',
+        google_official: 'google/',
+        anthropic_official: 'anthropic/',
+        local_openai_compatible: 'openai/'
+    }[providerKind] || 'openai/';
+    if (raw.startsWith(expectedPrefix)) return raw;
+    return `${expectedPrefix}${raw.replace(/^(openrouter|openai|google|anthropic)\//, '')}`;
+}
+
+function makeBlankModelEditorEntry() {
+    return {
+        id: nextModelEditorId(),
+        provider: 'openrouter',
+        model: '',
+        source: 'default',
+        base_url: '',
+        api_key: '',
+        tool_choice: ''
+    };
+}
+
+function deserializeModelEditorEntry(rawEntry, globalBaseUrl) {
+    const isObject = rawEntry && typeof rawEntry === 'object' && !Array.isArray(rawEntry);
+    const modelName = isObject ? String(rawEntry.name || '') : String(rawEntry || '');
+    const baseUrl = isObject ? String(rawEntry.base_url || '') : '';
+    const apiKey = isObject ? String(rawEntry.api_key || '') : '';
+    const toolChoice = isObject ? String(rawEntry.tool_choice || '') : '';
+    const provider = inferModelProviderKind(modelName, baseUrl, globalBaseUrl, !!apiKey);
+    return {
+        id: nextModelEditorId(),
+        provider,
+        model: stripModelNameForProvider(provider, modelName, baseUrl, globalBaseUrl),
+        source: (baseUrl || apiKey) ? 'custom' : 'default',
+        base_url: baseUrl,
+        api_key: apiKey,
+        tool_choice: toolChoice
+    };
+}
+
+function serializeModelEditorComparable(entry) {
+    return JSON.stringify({
+        provider: String(entry?.provider || '').trim(),
+        model: String(entry?.model || '').trim(),
+        source: String(entry?.source || 'default').trim(),
+        base_url: String(entry?.base_url || '').trim(),
+        api_key: String(entry?.api_key || '').trim(),
+        tool_choice: String(entry?.tool_choice || '').trim()
+    });
+}
+
+function cloneModelEditorEntry(entry) {
+    return {
+        id: nextModelEditorId(),
+        provider: entry.provider,
+        model: entry.model,
+        source: entry.source,
+        base_url: entry.base_url,
+        api_key: entry.api_key,
+        tool_choice: entry.tool_choice
+    };
+}
+
+function computeSharedModelEntries(slotEntries) {
+    const orderedBase = slotEntries.main || [];
+    if (!orderedBase.length) return [];
+    const otherSlots = ['read', 'figure', 'compressor', 'thinking'];
+    return orderedBase
+        .filter((entry) => otherSlots.every((slot) => (slotEntries[slot] || []).some((candidate) => serializeModelEditorComparable(candidate) === serializeModelEditorComparable(entry))))
+        .map((entry) => cloneModelEditorEntry(entry));
+}
+
+function createModelEntryPayload(entry) {
+    const resolvedName = normalizeModelNameForProvider(entry.provider, entry.model);
+    if (!resolvedName) return null;
+    const sourceMode = entry.source === 'custom' ? 'custom' : 'default';
+    const payload = { name: resolvedName };
+    if (sourceMode === 'custom' && String(entry.base_url || '').trim()) payload.base_url = String(entry.base_url || '').trim();
+    if (sourceMode === 'custom' && String(entry.api_key || '').trim()) payload.api_key = String(entry.api_key || '').trim();
+    if (String(entry.tool_choice || '').trim()) payload.tool_choice = String(entry.tool_choice || '').trim();
+    return Object.keys(payload).length === 1 ? payload.name : payload;
+}
+
+function buildGuidedLlmConfig() {
+    const config = { ...(lastLoadedGuidedLlmConfig || {}) };
+    config.temperature = Number(document.getElementById('guided-temperature')?.value) || 0;
+    config.max_tokens = Number(document.getElementById('guided-max-tokens')?.value) || 0;
+    config.max_context_window = Number(document.getElementById('guided-max-context')?.value) || 500000;
+    config.base_url = document.getElementById('guided-base-url')?.value?.trim() || '';
+    config.api_key = document.getElementById('guided-api-key')?.value?.trim() || '';
+    config.timeout = Number(document.getElementById('guided-timeout')?.value) || 600;
+    config.stream_timeout = Number(document.getElementById('guided-stream-timeout')?.value) || 30;
+    config.first_chunk_timeout = Number(document.getElementById('guided-first-chunk-timeout')?.value) || 30;
+    config.multimodal = !!document.getElementById('guided-multimodal')?.checked;
+    config.compressor_multimodal = !!document.getElementById('guided-compressor-multimodal')?.checked;
+
+    const sharedPayload = modelEditorState.shared.map(createModelEntryPayload).filter(Boolean);
+    Object.entries(MODEL_EDITOR_SLOT_CONFIG_KEYS).forEach(([slotKey, configKey]) => {
+        if (!configKey) return;
+        const slotPayload = (modelEditorState[slotKey] || []).map(createModelEntryPayload).filter(Boolean);
+        config[configKey] = [...sharedPayload, ...slotPayload];
+    });
+    return config;
+}
+
+function getModelEditorEntry(slotKey, entryId) {
+    return (modelEditorState[slotKey] || []).find((entry) => entry.id === entryId);
+}
+
+function renderModelEditorEntry(slotKey, entry) {
+    const resolvedName = normalizeModelNameForProvider(entry.provider, entry.model);
+    const customVisible = entry.source === 'custom' ? '' : 'display:none;';
+    return `
+        <div class="model-entry-card" data-slot="${slotKey}" data-id="${entry.id}">
+            <div class="model-entry-topbar">
+                <div class="form-group form-half">
+                    <label class="form-label">Provider</label>
+                    <select class="form-input" data-model-field="provider">
+                        ${MODEL_EDITOR_PROVIDER_OPTIONS}
+                    </select>
+                </div>
+                <div class="form-group form-half">
+                    <label class="form-label">Source</label>
+                    <select class="form-input" data-model-field="source">
+                        <option value="default">Use default URL / Key</option>
+                        <option value="custom">Custom URL / Key</option>
+                    </select>
+                </div>
+                <div class="form-group form-half">
+                    <label class="form-label">Tool Choice</label>
+                    <select class="form-input" data-model-field="tool_choice">
+                        <option value="">Default</option>
+                        <option value="required">required</option>
+                        <option value="auto">auto</option>
+                        <option value="none">none</option>
+                    </select>
+                </div>
+                <div class="model-entry-actions">
+                    <button class="btn-secondary" type="button" data-model-action="delete">Delete</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Model Name</label>
+                <input type="text" class="form-input" data-model-field="model" placeholder="For OpenRouter use vendor/model, e.g. google/gemini-3-flash-preview" value="${escapeHtml(entry.model)}">
+                <div class="model-entry-preview">Resolved model id: <code>${escapeHtml(resolvedName || '(empty)')}</code></div>
+            </div>
+            <div class="form-row model-entry-custom-source" style="${customVisible}">
+                <div class="form-group form-half">
+                    <label class="form-label">Custom Base URL</label>
+                    <input type="text" class="form-input" data-model-field="base_url" placeholder="https://..." value="${escapeHtml(entry.base_url)}">
+                </div>
+                <div class="form-group form-half">
+                    <label class="form-label">Custom API Key</label>
+                    <input type="text" class="form-input" data-model-field="api_key" placeholder="sk-..." value="${escapeHtml(entry.api_key)}">
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderModelEditorSlot(slotKey) {
+    const container = document.getElementById(`model-${slotKey}-list`);
+    if (!container) return;
+    const entries = modelEditorState[slotKey] || [];
+    if (!entries.length) {
+        container.innerHTML = '<div class="model-slot-empty">No models configured for this section.</div>';
+        return;
+    }
+    container.innerHTML = entries.map((entry) => renderModelEditorEntry(slotKey, entry)).join('');
+    entries.forEach((entry) => {
+        const card = container.querySelector(`[data-id="${entry.id}"]`);
+        if (!card) return;
+        const providerEl = card.querySelector('[data-model-field="provider"]');
+        const sourceEl = card.querySelector('[data-model-field="source"]');
+        const toolChoiceEl = card.querySelector('[data-model-field="tool_choice"]');
+        if (providerEl) providerEl.value = entry.provider;
+        if (sourceEl) sourceEl.value = entry.source;
+        if (toolChoiceEl) toolChoiceEl.value = entry.tool_choice || '';
+    });
+}
+
+function renderAllModelEditorSlots() {
+    ['shared', 'main', 'read', 'figure', 'compressor', 'thinking'].forEach(renderModelEditorSlot);
+}
+
+function loadGuidedModelSettings(config) {
+    const globalBaseUrl = String(config?.base_url || '').trim();
+    const parsedSlots = {
+        main: Array.isArray(config?.models) ? config.models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : [],
+        read: Array.isArray(config?.read_figure_models) ? config.read_figure_models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : [],
+        figure: Array.isArray(config?.figure_models) ? config.figure_models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : [],
+        compressor: Array.isArray(config?.compressor_models) ? config.compressor_models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : [],
+        thinking: Array.isArray(config?.thinking_models) ? config.thinking_models.map((item) => deserializeModelEditorEntry(item, globalBaseUrl)) : []
+    };
+    const shared = computeSharedModelEntries(parsedSlots);
+    const sharedKeys = new Set(shared.map((entry) => serializeModelEditorComparable(entry)));
+    modelEditorState = {
+        shared,
+        main: parsedSlots.main.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry),
+        read: parsedSlots.read.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry),
+        figure: parsedSlots.figure.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry),
+        compressor: parsedSlots.compressor.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry),
+        thinking: parsedSlots.thinking.filter((entry) => !sharedKeys.has(serializeModelEditorComparable(entry))).map(cloneModelEditorEntry)
+    };
+    renderAllModelEditorSlots();
+}
+
+function addModelEditorEntry(slotKey) {
+    if (!modelEditorState[slotKey]) return;
+    modelEditorState[slotKey].push(makeBlankModelEditorEntry());
+    renderModelEditorSlot(slotKey);
+}
+
+function bindModelEditorList(slotKey) {
+    const container = document.getElementById(`model-${slotKey}-list`);
+    if (!container) return;
+    container.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-model-action="delete"]');
+        if (!button) return;
+        const card = button.closest('.model-entry-card');
+        if (!card) return;
+        const entryId = card.dataset.id;
+        modelEditorState[slotKey] = (modelEditorState[slotKey] || []).filter((entry) => entry.id !== entryId);
+        renderModelEditorSlot(slotKey);
+    });
+    container.addEventListener('input', (event) => {
+        const field = event.target?.dataset?.modelField;
+        if (!field) return;
+        const card = event.target.closest('.model-entry-card');
+        if (!card) return;
+        const entry = getModelEditorEntry(slotKey, card.dataset.id);
+        if (!entry) return;
+        entry[field] = event.target.value;
+        if (field === 'model' || field === 'base_url' || field === 'api_key') {
+            const preview = card.querySelector('.model-entry-preview code');
+            if (preview) preview.textContent = normalizeModelNameForProvider(entry.provider, entry.model) || '(empty)';
+        }
+    });
+    container.addEventListener('change', (event) => {
+        const field = event.target?.dataset?.modelField;
+        if (!field) return;
+        const card = event.target.closest('.model-entry-card');
+        if (!card) return;
+        const entry = getModelEditorEntry(slotKey, card.dataset.id);
+        if (!entry) return;
+        entry[field] = event.target.value;
+        if (field === 'source' || field === 'provider') {
+            renderModelEditorSlot(slotKey);
+        }
+    });
+}
+
+function buildGuidedAppConfig() {
+    const base = { ...(lastLoadedGuidedAppConfig || {}) };
+    base.env = { ...(base.env || {}) };
+    base.runtime = { ...(base.runtime || {}) };
+    base.context = { ...(base.context || {}) };
+    base.mcp = { ...(base.mcp || {}) };
+    base.market = { ...(base.market || {}) };
+
+    const thinkingEnabled = !!document.getElementById('guided-thinking-enabled')?.checked;
+    const thinkingSteps = readPositiveNumber(document.getElementById('guided-thinking-steps')?.value, 30);
+    const visibleSkills = String(document.getElementById('guided-visible-skills')?.value || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    base.runtime.action_window_steps = thinkingSteps;
+    base.runtime.thinking_interval = thinkingSteps;
+    base.runtime.thinking_enabled = thinkingEnabled;
+    base.runtime.thinking_steps = thinkingSteps;
+    base.runtime.no_tool_retry_limit = readPositiveNumber(document.getElementById('guided-no-tool-retry-limit')?.value, 7);
+    base.runtime.max_turns = readPositiveNumber(document.getElementById('guided-max-turns')?.value, 100000);
+    base.runtime.visible_skills = visibleSkills;
+
+    base.context.user_history_compress_threshold_tokens = readNonNegativeNumber(document.getElementById('guided-user-history-threshold')?.value, 1500);
+    base.context.user_history_recent_items = readNonNegativeNumber(document.getElementById('guided-user-history-recent-items')?.value, 0);
+    base.context.structured_call_info_compress_threshold_agents = readPositiveNumber(document.getElementById('guided-structured-call-agent-threshold')?.value, 10);
+    base.context.structured_call_info_compress_threshold_tokens = readNonNegativeNumber(document.getElementById('guided-structured-call-token-threshold')?.value, 2200);
+    return base;
+}
+
+function fillGuidedConfig(llmConfig, appConfig) {
+    lastLoadedGuidedLlmConfig = llmConfig || {};
+    lastLoadedGuidedAppConfig = appConfig || {};
+    loadGuidedModelSettings(lastLoadedGuidedLlmConfig);
+
+    document.getElementById('guided-temperature').value = Number(lastLoadedGuidedLlmConfig.temperature ?? 0) || '';
+    document.getElementById('guided-max-tokens').value = Number(lastLoadedGuidedLlmConfig.max_tokens ?? 0) || '';
+    document.getElementById('guided-max-context').value = Number(lastLoadedGuidedLlmConfig.max_context_window ?? 500000) || '';
+    document.getElementById('guided-base-url').value = String(lastLoadedGuidedLlmConfig.base_url || '');
+    document.getElementById('guided-api-key').value = String(lastLoadedGuidedLlmConfig.api_key || '');
+    document.getElementById('guided-timeout').value = Number(lastLoadedGuidedLlmConfig.timeout ?? 600) || '';
+    document.getElementById('guided-stream-timeout').value = Number(lastLoadedGuidedLlmConfig.stream_timeout ?? 30) || '';
+    document.getElementById('guided-first-chunk-timeout').value = Number(lastLoadedGuidedLlmConfig.first_chunk_timeout ?? 30) || '';
+    document.getElementById('guided-multimodal').checked = !!lastLoadedGuidedLlmConfig.multimodal;
+    document.getElementById('guided-compressor-multimodal').checked = !!lastLoadedGuidedLlmConfig.compressor_multimodal;
+
+    const runtime = lastLoadedGuidedAppConfig.runtime || {};
+    const context = lastLoadedGuidedAppConfig.context || {};
+    document.getElementById('guided-thinking-enabled').checked = runtime.thinking_enabled !== false;
+    document.getElementById('guided-thinking-steps').value = Number(runtime.thinking_steps ?? runtime.thinking_interval ?? runtime.action_window_steps ?? 30) || '';
+    document.getElementById('guided-no-tool-retry-limit').value = Number(runtime.no_tool_retry_limit ?? 7) || '';
+    document.getElementById('guided-max-turns').value = Number(runtime.max_turns ?? 100000) || '';
+    document.getElementById('guided-user-history-threshold').value = Number(context.user_history_compress_threshold_tokens ?? 1500) || '';
+    document.getElementById('guided-user-history-recent-items').value = Number(context.user_history_recent_items ?? 0);
+    document.getElementById('guided-structured-call-agent-threshold').value = Number(context.structured_call_info_compress_threshold_agents ?? 10) || '';
+    document.getElementById('guided-structured-call-token-threshold').value = Number(context.structured_call_info_compress_threshold_tokens ?? 2200) || '';
+    document.getElementById('guided-visible-skills').value = Array.isArray(runtime.visible_skills) ? runtime.visible_skills.join('\n') : '';
+}
+
+async function loadGuidedConfig() {
+    const statusDiv = document.getElementById('config-status');
+    const fileNameSpan = document.getElementById('config-file-name');
+    fileNameSpan.textContent = 'Guided runtime config';
+    statusDiv.textContent = '';
+    statusDiv.className = 'config-status';
+
+    try {
+        const response = await fetch('/api/config/guided', {
+            credentials: 'include'
+        });
+        const data = await response.json();
+        if (data.error) {
+            statusDiv.textContent = `Error: ${data.error}`;
+            statusDiv.className = 'config-status error';
+            return;
+        }
+        fillGuidedConfig(data.llm_config || {}, data.app_config || {});
+    } catch (error) {
+        statusDiv.textContent = `Failed to load guided config: ${error.message}`;
+        statusDiv.className = 'config-status error';
+    }
+}
+
+async function saveGuidedConfig() {
+    const statusDiv = document.getElementById('config-status');
+    const saveBtn = document.getElementById('save-config-btn');
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    statusDiv.textContent = 'Saving...';
+    statusDiv.className = 'config-status';
+
+    try {
+        const response = await fetch('/api/config/guided', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+                llm_config: buildGuidedLlmConfig(),
+                app_config: buildGuidedAppConfig(),
+            })
+        });
+        const data = await response.json();
+        if (data.error) {
+            statusDiv.textContent = `Error: ${data.error}`;
+            statusDiv.className = 'config-status error';
+        } else {
+            statusDiv.textContent = data.message || 'Guided configuration saved successfully';
+            statusDiv.className = 'config-status success';
+            await loadConfigFileLists();
+            await loadGuidedConfig();
+        }
+    } catch (error) {
+        statusDiv.textContent = `Failed to save: ${error.message}`;
+        statusDiv.className = 'config-status error';
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="fas fa-save"></i> Save';
+    }
+}
+
+[
+    ['shared', 'add-shared-model-btn'],
+    ['main', 'add-main-model-btn'],
+    ['read', 'add-read-model-btn'],
+    ['figure', 'add-figure-model-btn'],
+    ['compressor', 'add-compressor-model-btn'],
+    ['thinking', 'add-thinking-model-btn']
+].forEach(([slotKey, buttonId]) => {
+    document.getElementById(buttonId)?.addEventListener('click', () => addModelEditorEntry(slotKey));
+    bindModelEditorList(slotKey);
+});
 
 // Open configuration modal
 function openConfigModal() {
     const modal = document.getElementById('config-modal');
     modal.style.display = 'flex';
     loadConfigFileLists();
-    // Load first file from run_env if available
     loadConfigFile(currentConfigFile, currentConfigType);
-    // Switch to editor tab by default
-    switchConfigTab('editor');
+    loadGuidedConfig();
+    switchConfigTab('guided');
 }
 
 // Close configuration modal
@@ -3121,6 +3599,7 @@ async function loadConfigFileLists() {
                 // Set icon based on filename
                 let icon = 'fas fa-file-code';
                 if (file.name.includes('llm')) icon = 'fas fa-brain';
+                else if (file.name.includes('app_config')) icon = 'fas fa-sliders-h';
                 else if (file.name.includes('tool')) icon = 'fas fa-tools';
                 else if (file.name.includes('api')) icon = 'fas fa-plug';
                 else if (file.name.includes('gemini')) icon = 'fas fa-robot';
@@ -3130,6 +3609,7 @@ async function loadConfigFileLists() {
                     currentConfigFile = file.name;
                     currentConfigType = 'run_env';
                     loadConfigFile(file.name, 'run_env');
+                    switchConfigTab('editor');
                 });
                 runEnvList.appendChild(item);
                 
@@ -3185,6 +3665,7 @@ async function loadConfigFileLists() {
                     currentConfigFile = file.name;
                     currentConfigType = 'agent';
                     loadConfigFile(file.name, 'agent');
+                    switchConfigTab('editor');
                 });
                 agentList.appendChild(item);
             });
@@ -3243,6 +3724,10 @@ async function loadConfigFile(filename, type = 'run_env') {
 
 // Save configuration file
 async function saveConfigFile() {
+    if (getActiveConfigTabName() === 'guided') {
+        await saveGuidedConfig();
+        return;
+    }
     const textarea = document.getElementById('config-editor-textarea');
     const fileNameSpan = document.getElementById('config-file-name');
     const statusDiv = document.getElementById('config-status');
@@ -3291,6 +3776,7 @@ async function saveConfigFile() {
 
 // Switch config tab
 function switchConfigTab(tabName) {
+    const fileNameSpan = document.getElementById('config-file-name');
     // Update tab buttons
     document.querySelectorAll('.config-tab').forEach(tab => {
         tab.classList.remove('active');
@@ -3304,9 +3790,15 @@ function switchConfigTab(tabName) {
         content.classList.remove('active');
     });
     
-    if (tabName === 'editor') {
+    if (tabName === 'guided') {
+        document.getElementById('tab-guided').classList.add('active');
+        document.getElementById('config-editor-actions').style.display = 'flex';
+        if (fileNameSpan) fileNameSpan.textContent = 'Guided runtime config';
+        loadGuidedConfig();
+    } else if (tabName === 'editor') {
         document.getElementById('tab-editor').classList.add('active');
         document.getElementById('config-editor-actions').style.display = 'flex';
+        if (fileNameSpan) fileNameSpan.textContent = currentConfigFile;
     } else if (tabName === 'tree') {
         document.getElementById('tab-tree').classList.add('active');
         document.getElementById('config-editor-actions').style.display = 'none';
@@ -3609,6 +4101,10 @@ function initConfigModal() {
     const reloadConfigBtn = document.getElementById('reload-config-btn');
     if (reloadConfigBtn) {
         reloadConfigBtn.addEventListener('click', () => {
+            if (getActiveConfigTabName() === 'guided') {
+                loadGuidedConfig();
+                return;
+            }
             const fileNameSpan = document.getElementById('config-file-name');
             loadConfigFile(fileNameSpan.textContent, currentConfigType);
         });

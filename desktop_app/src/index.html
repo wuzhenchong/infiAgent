@@ -147,28 +147,66 @@
         
         <!-- Model Tab -->
         <div id="tab-model" class="tab-content">
-          <div class="form-group">
-            <label class="form-label">Main Models <span class="form-hint">(one per line)</span></label>
-            <textarea id="setting-models" class="form-textarea" rows="3" placeholder="openai/gpt-4o"></textarea>
+          <div class="form-hint-block">
+            API 页签里填写的是默认 <code>base_url</code> 和 <code>api_key</code>。这里的每条模型都可以选择复用默认凭据，
+            也可以切到自定义 source，单独填写 URL / Key。Shared Models 会自动应用到所有功能分区。
           </div>
-          <div class="form-group">
-            <label class="form-label">Figure Models</label>
-            <textarea id="setting-figure-models" class="form-textarea" rows="2" placeholder="openai/gpt-4o"></textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Compressor Models</label>
-            <textarea id="setting-compressor-models" class="form-textarea" rows="2" placeholder="openai/gpt-4o-mini"></textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Read Figure Models</label>
-            <textarea id="setting-read-figure-models" class="form-textarea" rows="2" placeholder="openai/gpt-4o"></textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Thinking Models</label>
-            <textarea id="setting-thinking-models" class="form-textarea" rows="2" placeholder="openai/google/gemini-3-flash-preview"></textarea>
-            <p class="form-hint-block">支持一行一个模型名，也支持一行一个 JSON 对象，例如 <code>{"model":"openai/gpt-4o-mini","tool_choice":"required"}</code>。</p>
-            <p class="form-hint-block">若需要完整 YAML 能力（如顶层 <code>tool_choice</code> 或更复杂嵌套），请切到 Raw YAML。</p>
-          </div>
+
+          <details class="tool-details" open>
+            <summary class="tool-params-toggle">Shared Models (apply to all slots)</summary>
+            <div class="model-slot-toolbar">
+              <span class="form-hint">共享模型会同时写入主模型、读图、生图、压缩、thinking 五个分区。</span>
+              <button id="add-shared-model-btn" class="btn-secondary" type="button">+ Add Shared Model</button>
+            </div>
+            <div id="model-shared-list" class="model-slot-list"></div>
+          </details>
+
+          <details class="tool-details" open>
+            <summary class="tool-params-toggle">Main Models</summary>
+            <div class="model-slot-toolbar">
+              <span class="form-hint">主执行模型，可配置多候选顺序。</span>
+              <button id="add-main-model-btn" class="btn-secondary" type="button">+ Add Main Model</button>
+            </div>
+            <div id="model-main-list" class="model-slot-list"></div>
+          </details>
+
+          <details class="tool-details">
+            <summary class="tool-params-toggle">Read Figure Models</summary>
+            <div class="model-slot-toolbar">
+              <span class="form-hint">图片理解 / 读图场景。</span>
+              <button id="add-read-model-btn" class="btn-secondary" type="button">+ Add Read Figure Model</button>
+            </div>
+            <div id="model-read-list" class="model-slot-list"></div>
+          </details>
+
+          <details class="tool-details">
+            <summary class="tool-params-toggle">Figure Generation Models</summary>
+            <div class="model-slot-toolbar">
+              <span class="form-hint">生图模型列表。</span>
+              <button id="add-figure-model-btn" class="btn-secondary" type="button">+ Add Figure Model</button>
+            </div>
+            <div id="model-figure-list" class="model-slot-list"></div>
+          </details>
+
+          <details class="tool-details">
+            <summary class="tool-params-toggle">Compressor Models</summary>
+            <div class="model-slot-toolbar">
+              <span class="form-hint">历史压缩 / 摘要模型。</span>
+              <button id="add-compressor-model-btn" class="btn-secondary" type="button">+ Add Compressor Model</button>
+            </div>
+            <div id="model-compressor-list" class="model-slot-list"></div>
+          </details>
+
+          <details class="tool-details">
+            <summary class="tool-params-toggle">Thinking Models</summary>
+            <div class="model-slot-toolbar">
+              <span class="form-hint">Thinking Agent 专用模型。</span>
+              <button id="add-thinking-model-btn" class="btn-secondary" type="button">+ Add Thinking Model</button>
+            </div>
+            <div id="model-thinking-list" class="model-slot-list"></div>
+          </details>
+
+          <p class="form-hint-block">Raw YAML 仍然保留完整高级能力；保存本页后 Raw YAML 会立刻同步刷新。</p>
           <div class="form-row">
             <div class="form-group form-half">
               <label class="form-label">Temperature</label>
@@ -261,16 +299,25 @@
           </div>
 
           <div class="form-divider"></div>
-
+          
           <div class="form-row">
             <div class="form-group form-half">
-              <label class="form-label">Action Window Steps</label>
-              <input type="number" id="setting-action-window-steps" class="form-input" min="1" placeholder="30">
+              <label class="form-label">
+                <input type="checkbox" id="setting-thinking-enabled"> Enable Thinking Agent Mode
+              </label>
             </div>
             <div class="form-group form-half">
-              <label class="form-label">Thinking Interval</label>
-              <input type="number" id="setting-thinking-interval" class="form-input" min="1" placeholder="30">
+              <label class="form-label">Thinking Steps</label>
+              <input type="number" id="setting-thinking-steps" class="form-input" min="1" placeholder="30">
             </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">No-tool Retry Limit</label>
+            <input type="number" id="setting-no-tool-retry-limit" class="form-input" min="1" placeholder="7">
+            <p class="form-hint-block">
+              仅在 Thinking Agent 模式下使用。表示模型连续多少次未调用工具后，框架会强提醒并最终报错。
+            </p>
           </div>
 
           <div class="form-group">
@@ -286,6 +333,14 @@
           <div class="form-group">
             <label class="form-label">User History Compress Threshold (tokens)</label>
             <input type="number" id="setting-user-history-threshold" class="form-input" min="0" placeholder="1500">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Recent History Items</label>
+            <input type="number" id="setting-user-history-recent-items" class="form-input" min="0" placeholder="0 = all history">
+            <p class="form-hint-block">
+              0 表示沿用旧行为：读取全部历史任务后再按 token 阈值决定是否压缩。大于 0 时只读取最近 N 条历史任务。
+            </p>
           </div>
 
           <div class="form-row">
@@ -327,6 +382,14 @@
             <textarea id="setting-mcp-servers" class="form-textarea" rows="5" placeholder='{"name":"github","transport":"streamable_http","url":"https://example.com/mcp"}&#10;github=https://example.com/mcp&#10;https://example.com/mcp'></textarea>
             <p class="form-hint-block">
               MCP server 本身不是本地工具类。系统会连接这些 server，发现它们暴露的 tools，并把这些 tools 自动加入当前 agent 的可见工具集中。
+            </p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Visible Skills <span class="form-hint">(one per line, optional)</span></label>
+            <textarea id="setting-visible-skills" class="form-textarea" rows="4" placeholder="browser-use&#10;paper-analyze"></textarea>
+            <p class="form-hint-block">
+              若填写，则只向当前 agent 暴露这些 skills。留空表示暴露全部可见 skills。
             </p>
           </div>
 

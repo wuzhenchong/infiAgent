@@ -9,6 +9,7 @@ import time
 import unittest
 import warnings
 from pathlib import Path
+from unittest.mock import patch
 
 from infiagent import infiagent
 from core.hierarchy_manager import get_hierarchy_manager
@@ -16,7 +17,8 @@ from tool_server_lite.tools.skill_tools import FreshTool
 from tool_server_lite.tools.task_tools import AddMessageTool, ListTaskIdsTool, TaskShareContextPathTool
 from utils.config_loader import ConfigLoader
 from utils.runtime_control import pop_fresh_request, register_running_task, unregister_running_task
-from utils.user_paths import runtime_env_scope
+from utils.task_runtime import append_task_message
+from utils.user_paths import get_context_settings, get_runtime_settings, runtime_env_scope
 
 
 class SDKRuntimePathTests(unittest.TestCase):
@@ -101,6 +103,7 @@ class SDKRuntimePathTests(unittest.TestCase):
                 "start_background_task",
                 "task_share_context_path",
                 "list_task_ids",
+                "task_history_search",
             ]:
                 self.assertIn(tool_name, loader.all_tools)
 
@@ -111,6 +114,128 @@ class SDKRuntimePathTests(unittest.TestCase):
         agent = infiagent()
         with self.assertRaises(ValueError):
             agent.run("missing task id", task_id="")
+
+    def test_runtime_settings_support_new_reasoning_fields(self):
+        root = (self.base / "runtime_settings_root").resolve()
+        with runtime_env_scope({"MLA_USER_DATA_ROOT": str(root)}):
+            app_config_path = root / "config" / "app_config.json"
+            payload = {
+                "runtime": {
+                    "thinking_enabled": False,
+                    "thinking_steps": 12,
+                    "no_tool_retry_limit": 9,
+                    "action_window_steps": 30,
+                    "thinking_interval": 30,
+                    "max_turns": 321,
+                },
+                "context": {
+                    "user_history_recent_items": 11,
+                    "user_history_compress_threshold_tokens": 1700,
+                },
+            }
+            app_config_path.parent.mkdir(parents=True, exist_ok=True)
+            app_config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            for key in [
+                "MLA_THINKING_ENABLED",
+                "MLA_THINKING_STEPS",
+                "MLA_NO_TOOL_RETRY_LIMIT",
+                "MLA_MAX_TURNS",
+                "MLA_USER_HISTORY_COMPRESS_THRESHOLD_TOKENS",
+                "MLA_USER_HISTORY_RECENT_ITEMS",
+            ]:
+                os.environ.pop(key, None)
+
+            runtime = get_runtime_settings()
+            context = get_context_settings()
+
+            self.assertFalse(runtime["thinking_enabled"])
+            self.assertEqual(runtime["thinking_steps"], 12)
+            self.assertEqual(runtime["no_tool_retry_limit"], 9)
+            self.assertEqual(runtime["max_turns"], 321)
+            self.assertEqual(context["user_history_recent_items"], 11)
+            self.assertEqual(context["user_history_compress_threshold_tokens"], 1700)
+
+    def test_sdk_build_launch_config_includes_visible_skills_and_reasoning_fields(self):
+        root = (self.base / "sdk_reasoning_root").resolve()
+        agent = infiagent(
+            user_data_root=str(root),
+            thinking_enabled=False,
+            thinking_steps=8,
+            no_tool_retry_limit=6,
+            user_history_recent_items=5,
+            visible_skills=["skill_a", "skill_b"],
+        )
+
+        launch_config = agent._build_launch_config()
+        self.assertFalse(launch_config["thinking_enabled"])
+        self.assertEqual(launch_config["thinking_steps"], 8)
+        self.assertEqual(launch_config["no_tool_retry_limit"], 6)
+        self.assertEqual(launch_config["user_history_recent_items"], 5)
+        self.assertEqual(launch_config["visible_skills"], ["skill_a", "skill_b"])
+
+    def test_run_explicit_reasoning_overrides_take_priority(self):
+        root = (self.base / "run_override_root").resolve()
+        task_id = str((self.base / "run_override_task").resolve())
+        captured = {}
+
+        class DummyManager:
+            def _load_context(self):
+                return {"current": {}, "history": []}
+
+            def _save_context(self, _context):
+                return None
+
+            def _save_stack(self, _stack):
+                return None
+
+            def start_new_instruction(self, _instruction):
+                return "instruction_demo"
+
+        class DummyLoader:
+            def __init__(self, _system):
+                self.agent_system_name = "OpenCowork"
+
+            def get_tool_config(self, _agent_name):
+                return {"type": "llm_call_agent", "available_tools": []}
+
+        class DummyExecutor:
+            def __init__(self, **kwargs):
+                captured["runtime"] = get_runtime_settings()
+                captured["context"] = get_context_settings()
+                captured["agent_name"] = kwargs.get("agent_name")
+
+            def run(self, _task_id, _user_input):
+                return {"status": "success", "output": "ok"}
+
+        agent = infiagent(
+            user_data_root=str(root),
+            thinking_enabled=True,
+            thinking_steps=30,
+            no_tool_retry_limit=7,
+            user_history_recent_items=0,
+        )
+
+        with patch("infiagent.sdk.is_task_running", return_value=False), \
+             patch("infiagent.sdk.clean_before_start", return_value=None), \
+             patch("infiagent.sdk.ConfigLoader", DummyLoader), \
+             patch("infiagent.sdk.get_hierarchy_manager", return_value=DummyManager()), \
+             patch("infiagent.sdk.AgentExecutor", DummyExecutor):
+            result = agent.run(
+                "override demo",
+                task_id=task_id,
+                thinking_enabled=False,
+                thinking_steps=4,
+                no_tool_retry_limit=9,
+                user_history_recent_items=2,
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(captured["agent_name"], "alpha_agent")
+        self.assertFalse(captured["runtime"]["thinking_enabled"])
+        self.assertEqual(captured["runtime"]["thinking_steps"], 4)
+        self.assertEqual(captured["runtime"]["no_tool_retry_limit"], 9)
+        self.assertEqual(captured["context"]["user_history_recent_items"], 2)
 
     def test_sdk_instances_do_not_leak_user_data_roots(self):
         root_a = (self.base / "root_a").resolve()
@@ -254,6 +379,84 @@ class SDKRuntimePathTests(unittest.TestCase):
         self.assertEqual(launch_config["max_turns"], 321)
         runtime = agent.describe_runtime()
         self.assertEqual(runtime["max_turns"], 321)
+
+    def test_add_message_resume_if_needed_uses_resume_when_stack_exists(self):
+        root = (self.base / "resume_root").resolve()
+        task_id = str((self.base / "resume_task").resolve())
+
+        with runtime_env_scope({"MLA_USER_DATA_ROOT": str(root)}):
+            manager = get_hierarchy_manager(task_id)
+            manager.set_runtime_metadata(
+                agent_system="OpenCowork",
+                agent_name="alpha_agent",
+                user_input="previous input",
+            )
+            manager._save_stack([{
+                "agent_id": "alpha_agent_demo",
+                "agent_name": "alpha_agent",
+                "parent_id": None,
+                "level": 0,
+                "user_input": "previous input",
+                "start_time": "2026-03-25T10:00:00+08:00",
+            }])
+
+            with patch("utils.task_runtime.resume_task_with_fresh", return_value=(True, "resumed")) as resume_mock:
+                with patch("utils.task_runtime.launch_task_process") as launch_mock:
+                    ok, payload = append_task_message(
+                        task_id=task_id,
+                        message="resume me",
+                        source="user",
+                        resume_if_needed=True,
+                        fallback_agent_system="OpenCowork",
+                    )
+
+        self.assertTrue(ok)
+        self.assertTrue(payload["resumed"])
+        self.assertFalse(payload["launched"])
+        resume_mock.assert_called_once()
+        launch_mock.assert_not_called()
+
+    def test_add_message_resume_if_needed_launches_new_task_when_stack_empty(self):
+        root = (self.base / "launch_after_add_root").resolve()
+        task_id = str((self.base / "launch_after_add_task").resolve())
+
+        with runtime_env_scope({"MLA_USER_DATA_ROOT": str(root), "MLA_MAX_TURNS": "77"}):
+            manager = get_hierarchy_manager(task_id)
+            manager.set_runtime_metadata(
+                agent_system="OpenCowork",
+                agent_name="alpha_agent",
+                user_input="previous input",
+            )
+            manager._save_stack([])
+
+            with patch("utils.task_runtime.launch_task_process", return_value=(True, {
+                "message": f"已在后台启动任务: {task_id}",
+                "task_id": task_id,
+                "pid": 4321,
+                "log_path": str(root / "runtime" / "launched_tasks" / "demo.log"),
+                "agent_system": "OpenCowork",
+                "agent_name": "alpha_agent",
+            })) as launch_mock:
+                ok, payload = append_task_message(
+                    task_id=task_id,
+                    message="please continue",
+                    source="user",
+                    resume_if_needed=True,
+                    fallback_agent_system="OpenCowork",
+                    env_overrides={"MLA_USER_DATA_ROOT": str(root), "MLA_MAX_TURNS": "77"},
+                )
+
+        self.assertTrue(ok)
+        self.assertFalse(payload["resumed"])
+        self.assertTrue(payload["launched"])
+        launch_mock.assert_called_once()
+        kwargs = launch_mock.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], task_id)
+        self.assertEqual(kwargs["user_input"], "please continue")
+        self.assertEqual(kwargs["agent_system"], "OpenCowork")
+        self.assertEqual(kwargs["agent_name"], "alpha_agent")
+        self.assertEqual(kwargs["config"]["user_data_root"], str(root))
+        self.assertEqual(kwargs["config"]["max_turns"], 77)
 
 
 if __name__ == "__main__":

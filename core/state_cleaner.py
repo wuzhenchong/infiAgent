@@ -164,6 +164,8 @@ def clean_before_start(task_id: str, new_user_input: str = None):
             # 删除压缩的历史（如果有）
             if "_compressed_user_agent_history" in context["current"]:
                 del context["current"]["_compressed_user_agent_history"]
+            if "_compressed_user_agent_history_meta" in context["current"]:
+                del context["current"]["_compressed_user_agent_history_meta"]
             # 删除所有agent的结构化调用信息压缩缓存
             keys_to_delete = [k for k in context["current"].keys() if k.startswith("_compressed_structured_call_info_")]
             for key in keys_to_delete:
@@ -179,6 +181,11 @@ def clean_before_start(task_id: str, new_user_input: str = None):
         
         # 保存
         hierarchy_manager._save_context(context)
+        try:
+            from utils.task_history_index import sync_task_history_from_context
+            sync_task_history_from_context(task_id, context)
+        except Exception:
+            pass
         
         # 栈处理：
         # - 新任务：清空栈（重新建立层级）
@@ -207,4 +214,3 @@ if __name__ == "__main__":
     
     # 测试清理功能
     clean_before_start("test_task_123")
-

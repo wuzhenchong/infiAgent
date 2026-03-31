@@ -38,6 +38,7 @@ class ConfigLoader:
         # 加载所有配置
         self.general_prompts = self._load_general_prompts()
         self.all_tools = self._load_all_tools()
+        self._inject_framework_default_tools()
         
     def _find_config_root(self) -> str:
         """查找配置根目录"""
@@ -99,6 +100,49 @@ class ConfigLoader:
                     all_tools.update(tools)
         
         return all_tools
+
+    def _inject_framework_default_tools(self):
+        """注入框架级默认工具，无需逐个 agent_system 重复声明。"""
+        self.all_tools.setdefault(
+            "task_history_search",
+            {
+                "level": 0,
+                "type": "tool_call_agent",
+                "name": "task_history_search",
+                "description": "检索当前用户数据根目录下的历史任务数据库。支持 sql 和 semantic 两种模式。sql 模式推荐把 SELECT 语句放在 sql 字段，也支持直接把 SELECT 写进 query 字段；可查询只读视图 task_history。semantic 模式会返回与查询语义最接近的历史 instruction bundle / task summary。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keyword": {
+                            "type": "string",
+                            "description": "关键词检索文本。适合精确查找文件名、任务关键词、输出中的关键短语。",
+                        },
+                        "relevance_query_text": {
+                            "type": "string",
+                            "description": "相关性检索文本。只有在 enable_vector_search=true 时才会生效，用于语义匹配历史任务。",
+                        },
+                        "start_time_from": {
+                            "type": "string",
+                            "description": "可选。历史任务开始时间下界（ISO 时间字符串）。",
+                        },
+                        "start_time_to": {
+                            "type": "string",
+                            "description": "可选。历史任务开始时间上界（ISO 时间字符串）。",
+                        },
+                        "start_round": {
+                            "type": "integer",
+                            "description": "可选。从第几条历史任务开始检索，按历史顺序从 1 开始计数。",
+                        },
+                        "enable_vector_search": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "是否启用向量/语义检索。关闭时 relevance_query_text 会被忽略。",
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        )
     
     def get_tool_config(self, tool_name: str) -> Dict:
         """
@@ -147,6 +191,9 @@ class ConfigLoader:
             "max_tokens": ["max_tokens"],
             "action_window_steps": ["action_window_steps"],
             "thinking_interval": ["thinking_interval"],
+            "thinking_steps": ["thinking_steps", "thinking_interval", "action_window_steps"],
+            "thinking_enabled": ["thinking_enabled"],
+            "no_tool_retry_limit": ["no_tool_retry_limit"],
         }
 
         for canonical_name, aliases in alias_fields.items():

@@ -131,6 +131,31 @@ install_playwright_chromium() {
   PLAYWRIGHT_BROWSERS_PATH="${dl_dir}" "${venv_dir}/bin/python" -m playwright install chromium
 }
 
+macos_playwright_host_platform_override() {
+  local target_arch="$1"  # arm64 | x64
+  python3 - <<'PY' "${target_arch}"
+import platform
+import sys
+
+target_arch = sys.argv[1]
+release_major = int(platform.release().split(".", 1)[0])
+
+if release_major < 18:
+    base = "mac10.13"
+elif release_major == 18:
+    base = "mac10.14"
+elif release_major == 19:
+    base = "mac10.15"
+else:
+    base = f"mac{min(release_major - 9, 15)}"
+
+if target_arch == "arm64" and not base.endswith("-arm64"):
+    base = f"{base}-arm64"
+
+print(base)
+PY
+}
+
 ensure_packaged_playwright_browsers() {
   # After PyInstaller, copy downloaded Playwright browsers into bundle.
   # Source is build-local directory (see install_playwright_chromium()).
@@ -377,7 +402,9 @@ PY
     echo "[backend_build] install Playwright Chromium (darwin-x64)"
     DL_DIR="${WORK_ROOT}/playwright-browsers/darwin-x64"
     mkdir -p "${DL_DIR}"
-    PLAYWRIGHT_BROWSERS_PATH="${DL_DIR}" arch -x86_64 "${VENV_X64}/bin/python" -m playwright install chromium
+    PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$(macos_playwright_host_platform_override x64)" \
+    PLAYWRIGHT_BROWSERS_PATH="${DL_DIR}" \
+    arch -x86_64 "${VENV_X64}/bin/python" -m playwright install chromium
   else
     echo "[backend_build] Playwright not installed in venv_x64; skip browser download."
   fi

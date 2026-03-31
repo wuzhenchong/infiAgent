@@ -129,12 +129,17 @@ function defaultAppConfig() {
     runtime: {
       action_window_steps: 30,
       thinking_interval: 30,
+      thinking_enabled: true,
+      thinking_steps: 30,
+      no_tool_retry_limit: 7,
+      visible_skills: [],
       max_turns: 100000,
       fresh_enabled: false,
       fresh_interval_sec: 0
     },
     context: {
       user_history_compress_threshold_tokens: 1500,
+      user_history_recent_items: 0,
       structured_call_info_compress_threshold_agents: 10,
       structured_call_info_compress_threshold_tokens: 2200
     },
@@ -184,6 +189,7 @@ function readAppConfig() {
   if (typeof out.env.command_mode !== 'string' || !out.env.command_mode.trim()) out.env.command_mode = 'direct';
   if (!Array.isArray(out.mcp.servers)) out.mcp.servers = [];
   if (typeof out.market.base_url !== 'string') out.market.base_url = '';
+  if (!Array.isArray(out.runtime.visible_skills)) out.runtime.visible_skills = [];
   return out;
 }
 
@@ -271,9 +277,13 @@ function buildRuntimeEnv() {
   env.MLA_EXECUTE_COMMAND_MODE = (appCfg?.env?.command_mode === 'system_terminal') ? 'system_terminal' : 'direct';
   env.MLA_ACTION_WINDOW_STEPS = String(appCfg?.runtime?.action_window_steps || 30);
   env.MLA_THINKING_INTERVAL = String(appCfg?.runtime?.thinking_interval || appCfg?.runtime?.action_window_steps || 30);
+  env.MLA_THINKING_ENABLED = appCfg?.runtime?.thinking_enabled !== false ? 'true' : 'false';
+  env.MLA_THINKING_STEPS = String(appCfg?.runtime?.thinking_steps || appCfg?.runtime?.thinking_interval || appCfg?.runtime?.action_window_steps || 30);
+  env.MLA_NO_TOOL_RETRY_LIMIT = String(appCfg?.runtime?.no_tool_retry_limit || 7);
   env.MLA_MAX_TURNS = String(appCfg?.runtime?.max_turns || 100000);
   env.MLA_FRESH_ENABLED = appCfg?.runtime?.fresh_enabled ? 'true' : 'false';
   env.MLA_FRESH_INTERVAL_SEC = String(appCfg?.runtime?.fresh_interval_sec || 0);
+  env.MLA_VISIBLE_SKILLS_JSON = JSON.stringify(Array.isArray(appCfg?.runtime?.visible_skills) ? appCfg.runtime.visible_skills : []);
   env.MLA_SKILLS_LIBRARY_DIR = getSkillsLibraryPath();
 
   // Encourage consistent unicode behavior
